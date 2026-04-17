@@ -1,0 +1,24 @@
+# Optional local PostgreSQL for offline dev. Default workflow uses nHost — set DATABASE_URL in backend/.env.
+# Start: docker compose up -d
+# Stop:  docker compose down
+# Connection: backend/.env.local.example → copy to backend/.env.local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: yamma_local_dev
+      POSTGRES_DB: yamma
+    ports:
+      - '5432:5432'
+    volumes:
+      - yamma_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d yamma']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  yamma_pgdata:

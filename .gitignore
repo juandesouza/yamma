@@ -1,0 +1,17 @@
+# Environment (use *.example templates; never commit real secrets)
+backend/.env
+backend/.env.local
+web/.env
+web/.env.local
+mobile/.env.local
+
+node_modules
+dist
+.next
+*.log
+.DS_Store
+coverage
+.turbo
+
+# Local tooling binary (e.g. nhost CLI) — do not commit
+/cli

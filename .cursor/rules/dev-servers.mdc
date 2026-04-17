@@ -1,0 +1,16 @@
+---
+description: Start Postgres + dev servers yourself; never delegate to the user
+alwaysApply: true
+---
+
+# Database (nHost Postgres)
+
+The API uses **`DATABASE_URL`** in `backend/.env` (default: **nHost**). Schema is defined in `backend/src/db/schema.ts`; apply with **`pnpm run db:migrate`** against that URL.
+
+Optional **local Postgres:** [`docker-compose.yml`](docker-compose.yml) + `backend/.env.local` (see `backend/.env.local.example`). When the user is on local Docker, run **`docker compose up -d`** from the workspace root yourself—**do not** ask the user to run Docker unless they prefer to manage containers manually.
+
+# Dev servers (backend + web)
+
+When code changes require a running process restart (Nest backend, Next web), **restart those servers yourself** using the project shell (stop listeners on ports **3001** and **3000** if needed, then start again). Do **not** tell the user to restart or paste commands for them to run unless they explicitly prefer to run servers manually.
+
+Root scripts: `pnpm run dev:backend`, `pnpm run dev:web` (from the workspace root).

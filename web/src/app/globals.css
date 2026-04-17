@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    --yamma-bg: #0f1014;
+    --yamma-surface: #1c1d23;
+    --yamma-surface-elevated: #14151a;
+    --yamma-border: #2c2d35;
+    --yamma-border-muted: #40424d;
+    --yamma-text: #ffffff;
+    --yamma-text-secondary: #e8e8ec;
+    --yamma-text-muted: #7c7e8c;
+    --yamma-text-subtle: #a8aab5;
+    --yamma-placeholder: #5c5e6b;
+    --yamma-primary: #ff5500;
+    --yamma-primary-hover: #e64d00;
+    --yamma-button-secondary-bg: #2c2d35;
+    --yamma-button-secondary-hover: #40424d;
+    --yamma-header-bg: rgba(15, 16, 20, 0.9);
+    --yamma-shadow-card: rgba(0, 0, 0, 0.32);
+    --yamma-shadow-soft: rgba(0, 0, 0, 0.35);
+    --yamma-popover: #0f1014;
+    --yamma-divider-subtle: #23242b;
+  }
+
+  html[data-theme='light'] {
+    --yamma-bg: #f0f1f5;
+    --yamma-surface: #ffffff;
+    --yamma-surface-elevated: #e8eaef;
+    --yamma-border: #d8dbe4;
+    --yamma-border-muted: #c4c8d4;
+    --yamma-text: #14151a;
+    --yamma-text-secondary: #2a2d38;
+    --yamma-text-muted: #5c6070;
+    --yamma-text-subtle: #6a6e7e;
+    --yamma-placeholder: #8b90a0;
+    --yamma-primary: #ff5500;
+    --yamma-primary-hover: #e64d00;
+    --yamma-button-secondary-bg: #e4e6ed;
+    --yamma-button-secondary-hover: #d6d9e3;
+    --yamma-header-bg: rgba(255, 255, 255, 0.92);
+    --yamma-shadow-card: rgba(15, 16, 20, 0.08);
+    --yamma-shadow-soft: rgba(15, 16, 20, 0.12);
+    --yamma-popover: #eef0f5;
+    --yamma-divider-subtle: #dde0e8;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply antialiased;
+    background: var(--yamma-bg);
+    color: var(--yamma-text);
+  }
+}
+
+@layer utilities {
+  .animate-in {
+    animation-duration: 0.3s;
+    animation-fill-mode: both;
+  }
+  .slide-in-from-right {
+    animation-name: slideInFromRight;
+  }
+  .zoom-in-95 {
+    animation-name: zoomIn95;
+  }
+  .fade-in {
+    animation-name: fadeIn;
+  }
+}
+
+@keyframes slideInFromRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0.8;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes zoomIn95 {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

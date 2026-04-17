@@ -1,0 +1,39 @@
+{
+  "name": "yamma",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Yamma - Production-ready food delivery platform",
+  "workspaces": [
+    "design-system",
+    "backend",
+    "web",
+    "mobile"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w web -- --webpack",
+    "dev:backend": "npm run start:dev -w backend",
+    "dev:mobile": "pnpm --filter mobile run start",
+    "mobile:expo": "pnpm --filter mobile exec expo",
+    "build": "npm run build -w design-system && npm run build -w backend && npm run build -w web",
+    "build:design-system": "npm run build -w design-system",
+    "db:generate": "npm run db:generate -w backend",
+    "db:migrate": "npm run db:migrate -w backend",
+    "db:migrate:env": "npm run db:migrate:env -w backend",
+    "db:push": "npm run db:push -w backend",
+    "db:push:env": "npm run db:push:env -w backend",
+    "lemon:list-variants": "pnpm --filter backend run lemon:list-variants"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "pnpm": {
+    "overrides": {
+      "react": "19.1.0",
+      "react-dom": "19.1.0",
+      "react-native": "0.81.5",
+      "react-native-svg": "15.12.1",
+      "react-native-worklets": "0.5.1"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+.env
+.expo/
+dist/
+
+# iOS is generated on macOS: `pnpm run prebuild -F mobile` (add `--platform ios` if needed)
+/ios
