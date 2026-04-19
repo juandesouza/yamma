@@ -3,7 +3,7 @@ import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { DarkTheme, NavigationContainer } from '@react-navigation/native';
+import { createNavigationContainerRef, DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as SplashScreen from 'expo-splash-screen';
 import * as WebBrowser from 'expo-web-browser';
@@ -11,6 +11,7 @@ import { StatusBar } from 'expo-status-bar';
 import { YammaLogo } from '@yamma/design-system';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import type { AuthStackParamList, BuyerStackParamList } from './src/navigation/types';
+import { PaymentReturnDeepLink } from './src/navigation/PaymentReturnDeepLink';
 import WelcomeScreen from './src/screens/WelcomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
@@ -22,6 +23,8 @@ import CartScreen from './src/screens/CartScreen';
 import CheckoutScreen from './src/screens/CheckoutScreen';
 import OrderTrackingScreen from './src/screens/OrderTrackingScreen';
 import SellerDashboardScreen from './src/screens/SellerDashboardScreen';
+
+const buyerNavigationRef = createNavigationContainerRef<BuyerStackParamList>();
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const BuyerStack = createNativeStackNavigator<BuyerStackParamList>();
@@ -152,7 +155,8 @@ export default function App() {
       <StatusBar style="light" backgroundColor="#0f1014" />
       <SafeAreaProvider>
         <AuthProvider>
-          <NavigationContainer theme={navigationTheme}>
+          <NavigationContainer ref={buyerNavigationRef} theme={navigationTheme}>
+            <PaymentReturnDeepLink navigationRef={buyerNavigationRef} />
             <RootNavigator />
           </NavigationContainer>
         </AuthProvider>

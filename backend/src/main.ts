@@ -4,7 +4,8 @@ import { ConfigService } from './config/config.service';
 import * as cookieParser from 'cookie-parser';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  /** Lemon Squeezy signs the raw JSON body; without this, HMAC verification always fails. */
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
   app.use(cookieParser(config.sessionSecret));
   app.enableCors({

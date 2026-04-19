@@ -15,6 +15,20 @@ export interface CreatePaymentInput {
    * `mobile` — redirect to HTTPS bridge page that opens `yamma://` so the in-app browser can complete.
    */
   checkoutSuccessTarget?: 'web' | 'mobile';
+  /**
+   * Normalized origin only (e.g. `https://your-next.ngrok-free.app`), no trailing slash.
+   * Used as Lemon `redirect_url` host; must be reachable from the buyer’s phone browser.
+   */
+  lemonRedirectBase: string;
+  /** From order row — passed to Lemon checkout `custom_data` / webhooks. */
+  restaurantId?: string;
+  /**
+   * Pre-generated opaque token; Lemon `redirect_url` is `${base}/payment/return/${returnToken}` (under 255 chars).
+   * The real `exp://` / `yamma://` URL is stored in DB and resolved at redirect time.
+   */
+  returnToken?: string;
+  /** Full deep link from `Linking.createURL` — stored server-side, not embedded in Lemon URL. */
+  mobileAppResumeUrl?: string;
 }
 
 export interface PaymentResult {

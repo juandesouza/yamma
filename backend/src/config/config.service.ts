@@ -165,4 +165,22 @@ export class ConfigService {
   get moonpayWebhookSecret(): string | undefined {
     return this.nest.get('MOONPAY_WEBHOOK_SECRET', { infer: true });
   }
+
+  /** Origins (scheme + host + optional port) allowed for mobile Lemon `paymentReturnBaseUrl` in production. */
+  get paymentReturnOriginAllowlistOrigins(): string[] {
+    const raw = this.nest.get('PAYMENT_RETURN_ORIGIN_ALLOWLIST', { infer: true })?.trim();
+    if (!raw) return [];
+    const out: string[] = [];
+    for (const part of raw.split(',')) {
+      const t = part.trim();
+      if (!t) continue;
+      try {
+        const u = new URL(t.includes('://') ? t : `https://${t}`);
+        out.push(u.origin);
+      } catch {
+        /* skip invalid */
+      }
+    }
+    return out;
+  }
 }

@@ -11,5 +11,5 @@ export type BuyerStackParamList = {
   Restaurant: { restaurantId: string };
   Cart: { restaurantId: string };
   Checkout: { restaurantId: string };
-  OrderTracking: { orderId: string };
+  OrderTracking: { orderId: string; restaurantId?: string; clearCartOnEntry?: boolean };
 };

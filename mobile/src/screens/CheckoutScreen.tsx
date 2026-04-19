@@ -21,8 +21,10 @@ import {
   saveDelivery,
   type CartLine,
 } from '../lib/cart';
+import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { API_BASE_URL } from '../config/api';
+import { getMobileLemonReturnBaseUrl } from '../config/paymentReturn';
 
 type CheckoutStep = 'address' | 'payment';
 
@@ -51,6 +53,9 @@ export default function CheckoutScreen() {
   const geocodeSeq = useRef(0);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /** Public HTTPS origin for Lemon post-checkout redirect (Next or same as API; see mobile/.env.example). */
+  const paymentBridgeBaseUrl = useMemo(() => getMobileLemonReturnBaseUrl(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,22 +177,32 @@ export default function CheckoutScreen() {
     }
   }
 
-  async function waitForOrderConfirmation(oid: string): Promise<boolean> {
+  async function clearPaidCart() {
+    if (!restaurantId) return;
+    await clearCart(restaurantId);
+    setItems([]);
+  }
+
+  /** Poll until order is no longer pending; clears cart when paid (navigation handled by caller). */
+  async function waitUntilOrderPaidAndClearCart(oid: string): Promise<boolean> {
     const maxPolls = 90;
     for (let poll = 0; poll < maxPolls; poll++) {
       const res = await fetchAuthed(`/orders/${oid}`);
       const data = (await res.json().catch(() => ({}))) as { status?: string };
       if (res.ok && data.status && data.status !== 'pending') {
-        await clearCart(restaurantId);
-        navigation.replace('OrderTracking', { orderId: oid });
+        await clearPaidCart();
         return true;
       }
-      if (__DEV__ && poll >= 3) {
-        await fetchAuthed('/payments/dev/confirm-lemon-return', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId: oid }),
-        });
+      if (poll >= 3 && poll % 3 === 0) {
+        try {
+          await fetchAuthed('/payments/dev/confirm-lemon-return', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderId: oid }),
+          });
+        } catch {
+          /* ignore: endpoint is disabled in production */
+        }
       }
       await new Promise((r) => setTimeout(r, 2000));
     }
@@ -199,8 +214,18 @@ export default function CheckoutScreen() {
       Alert.alert('Order missing', 'Create order first.');
       return;
     }
+    if (!paymentBridgeBaseUrl) {
+      Alert.alert(
+        'Card payment setup',
+        'Use a public HTTPS API URL (e.g. ngrok to port 3001), or set EXPO_PUBLIC_PAYMENT_RETURN_BASE_URL to that same origin or to your Next.js HTTPS origin. Restart Expo after changing .env.',
+      );
+      return;
+    }
     setBusy(true);
     try {
+      const mobileAppResumeUrl = Linking.createURL('payment-return', {
+        queryParams: { orderId, restaurantId },
+      });
       const res = await fetchAuthed('/payments/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -208,6 +233,8 @@ export default function CheckoutScreen() {
           orderId,
           provider: 'lemon_squeeze',
           checkoutSuccessTarget: 'mobile',
+          mobileAppResumeUrl,
+          ...(paymentBridgeBaseUrl ? { paymentReturnBaseUrl: paymentBridgeBaseUrl } : {}),
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -244,7 +271,15 @@ export default function CheckoutScreen() {
 
       // `success` = redirect URL was captured. `opened` can occur on Android when the tab closes without a parsed redirect.
       if (browserResult.type === 'success' || browserResult.type === 'opened') {
-        const ok = await waitForOrderConfirmation(orderId);
+        navigation.replace('OrderTracking', {
+          orderId,
+          restaurantId,
+          clearCartOnEntry: true,
+        });
+        // `opened` is common on Android when the in-app browser closes without a parsed redirect URL.
+        // Clear local cart on any return from the Lemon session (cancel/dismiss handled above).
+        await clearPaidCart();
+        const ok = await waitUntilOrderPaidAndClearCart(orderId);
         if (!ok) {
           Alert.alert(
             'Still confirming',
@@ -323,29 +358,31 @@ export default function CheckoutScreen() {
       ) : (
         <>
           <Text style={styles.sectionTitle}>Payment method</Text>
+          {!paymentBridgeBaseUrl ? (
+            <View style={styles.paymentWarn}>
+              <Text style={styles.paymentWarnTitle}>Setup required for card payment</Text>
+              <Text style={styles.paymentWarnBody}>
+                Use EXPO_PUBLIC_API_URL with a public HTTPS URL (ngrok to port 3001), or set EXPO_PUBLIC_PAYMENT_RETURN_BASE_URL
+                to that same origin. The API serves /payment/app-redirect so one ngrok tunnel is enough. Restart Expo after
+                changing .env.
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.paymentCard}>
             <Text style={styles.paymentTitle}>Card - Lemon Squeezy</Text>
             <Text style={styles.help}>
-              Pay securely in the browser. When payment completes, you return to the app and we open your order status.
+              Pay securely in the browser. When payment completes, you return to the app and we show your order status.
+              After it is confirmed, you can also open it from Profile → Orders.
             </Text>
             <TouchableOpacity
-              style={[styles.primaryButton, busy && styles.buttonDisabled]}
+              style={[styles.primaryButton, (busy || !paymentBridgeBaseUrl) && styles.buttonDisabled]}
               onPress={() => void handlePayWithLemon()}
-              disabled={busy}
+              disabled={busy || !paymentBridgeBaseUrl}
               activeOpacity={0.9}
             >
               {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryButtonText}>Pay with Lemon Squeezy</Text>}
             </TouchableOpacity>
           </View>
-          {orderId ? (
-            <TouchableOpacity
-              onPress={() => navigation.navigate('OrderTracking', { orderId })}
-              activeOpacity={0.85}
-              style={styles.inlineLinkWrap}
-            >
-              <Text style={styles.inlineLink}>View this order’s status</Text>
-            </TouchableOpacity>
-          ) : null}
         </>
       )}
     </ScrollView>
@@ -419,7 +456,15 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   primaryButtonText: { color: '#fff', fontWeight: '700' },
-  inlineLinkWrap: { alignItems: 'center', marginTop: 8, paddingVertical: 8 },
-  inlineLink: { color: '#ff9a66', fontWeight: '600', fontSize: 15 },
+  paymentWarn: {
+    borderWidth: 1,
+    borderColor: '#7c2d12',
+    backgroundColor: '#2a1510',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  paymentWarnTitle: { color: '#fdba74', fontWeight: '700', fontSize: 15, marginBottom: 6 },
+  paymentWarnBody: { color: '#d1d5db', fontSize: 13, lineHeight: 20 },
   buttonDisabled: { opacity: 0.65 },
 });

@@ -8,6 +8,13 @@
       "when": 1775780913866,
       "tag": "0000_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1775780914000,
+      "tag": "0001_payments_return_token",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,7 @@ import {
   boolean,
   pgEnum,
   index,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -214,12 +215,15 @@ export const payments = pgTable(
     amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
     currency: text('currency').notNull().default('USD'),
     metadata: text('metadata'), // JSON
+    /** Short id for Lemon `redirect_url` (255 char max); full Expo deep link stored in `metadata.mobileResumeUrl`. */
+    returnToken: text('return_token'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index('payments_order_idx').on(t.orderId),
     index('payments_provider_id_idx').on(t.providerPaymentId),
+    uniqueIndex('payments_return_token_uidx').on(t.returnToken),
   ]
 );
 

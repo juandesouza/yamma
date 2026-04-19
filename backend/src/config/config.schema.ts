@@ -25,6 +25,8 @@ export const configValidationSchema = z.object({
   GOOGLE_EXPO_CLIENT_ID: z.string().optional(),
   GOOGLE_CALLBACK_URL: z.string().url().optional(),
   FRONTEND_URL: z.string().url().optional(),
+  /** Comma-separated origins allowed for mobile Lemon return (e.g. `https://a.ngrok-free.app,https://b.ngrok.app`). */
+  PAYMENT_RETURN_ORIGIN_ALLOWLIST: z.string().optional(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().optional(),
   SMTP_USER: z.string().optional(),

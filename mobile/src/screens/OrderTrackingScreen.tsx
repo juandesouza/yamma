@@ -1,16 +1,25 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { useAuth } from '../auth/AuthContext';
-
-type Params = { orderId: string };
+import { clearCart } from '../lib/cart';
+import type { BuyerStackParamList } from '../navigation/types';
 
 export default function OrderTrackingScreen() {
-  const route = useRoute<RouteProp<{ params: Params }, 'params'>>();
+  const route = useRoute<RouteProp<BuyerStackParamList, 'OrderTracking'>>();
   const orderId = route.params?.orderId ?? '';
+  const restaurantIdParam = route.params?.restaurantId;
+  const clearCartOnEntry = route.params?.clearCartOnEntry === true;
   const { fetchAuthed } = useAuth();
   const [status, setStatus] = useState<string>('…');
   const [loading, setLoading] = useState(true);
+  const cartClearedRef = useRef(false);
+
+  useEffect(() => {
+    if (!clearCartOnEntry || !restaurantIdParam || cartClearedRef.current) return;
+    cartClearedRef.current = true;
+    void clearCart(restaurantIdParam);
+  }, [clearCartOnEntry, restaurantIdParam]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | undefined;
@@ -20,8 +29,18 @@ export default function OrderTrackingScreen() {
       try {
         const res = await fetchAuthed(`/orders/${orderId}`);
         if (cancelled || !res.ok) return;
-        const data = (await res.json()) as { status?: string };
+        const data = (await res.json()) as { status?: string; restaurantId?: string };
         setStatus(data.status ?? 'pending');
+        if (
+          !cartClearedRef.current &&
+          data.status &&
+          data.status !== 'pending' &&
+          typeof data.restaurantId === 'string' &&
+          data.restaurantId.length > 0
+        ) {
+          cartClearedRef.current = true;
+          await clearCart(data.restaurantId);
+        }
       } catch {
         if (!cancelled) setStatus('unknown');
       } finally {

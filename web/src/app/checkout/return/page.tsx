@@ -20,6 +20,7 @@ export default function CheckoutReturnPage() {
 
   useEffect(() => {
     if (!orderId || cancelled) return;
+    const oid = orderId;
 
     let pollCount = 0;
     let devConfirmAttempted = false;
@@ -27,7 +28,7 @@ export default function CheckoutReturnPage() {
 
     async function poll() {
       try {
-        const res = await fetch(`/api/orders/${orderId}`, { credentials: 'include' });
+        const res = await fetch(`/api/orders/${oid}`, { credentials: 'include' });
         if (!res.ok) {
           setStatus('error');
           return;
@@ -36,10 +37,10 @@ export default function CheckoutReturnPage() {
         const s = typeof data?.status === 'string' ? data.status : null;
         setOrderStatus(s);
         if (s && s !== 'pending') {
-          clearCartIfAwaitingOrderPaid(orderId);
+          clearCartIfAwaitingOrderPaid(oid);
           setStatus('ready');
           if (timer) clearInterval(timer);
-          window.location.replace(`/order/${orderId}`);
+          window.location.replace(`/order/${oid}`);
           return;
         }
         if (
@@ -53,13 +54,13 @@ export default function CheckoutReturnPage() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ orderId }),
+            body: JSON.stringify({ orderId: oid }),
           });
           if (cr.ok) {
-            clearCartIfAwaitingOrderPaid(orderId);
+            clearCartIfAwaitingOrderPaid(oid);
             setStatus('ready');
             if (timer) clearInterval(timer);
-            window.location.replace(`/order/${orderId}`);
+            window.location.replace(`/order/${oid}`);
             return;
           }
         }

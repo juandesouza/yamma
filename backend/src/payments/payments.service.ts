@@ -3,26 +3,66 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { createDb } from '../db';
 import { payments, orders, users, restaurants } from '../db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, or, sql } from 'drizzle-orm';
 import { LemonSqueezeProvider } from './providers/lemon-squeeze.provider';
 import { OrdersService } from '../orders/orders.service';
+import { ConfigService } from '../config/config.service';
+
+export type CreatePaymentOptions = {
+  checkoutSuccessTarget?: 'web' | 'mobile';
+  /** Public origin of the web app (Next) for Lemon redirect — see controller schema. */
+  paymentReturnBaseUrl?: string;
+  /** Deep link from the mobile app (`Linking.createURL`) so the bridge can open Expo Go / dev client. */
+  mobileAppResumeUrl?: string;
+};
 
 @Injectable()
 export class PaymentsService {
   private db = createDb(process.env.DATABASE_URL!);
+  private readonly logger = new Logger(PaymentsService.name);
 
   constructor(
     private lemon: LemonSqueezeProvider,
     private orders: OrdersService,
+    private config: ConfigService,
   ) {}
 
   getProvider() {
     return this.lemon;
+  }
+
+  /** Resolves stored Expo / dev-client deep link for Lemon return URL `/payment/return/:token`. */
+  async getMobileResumeUrlByReturnToken(token: string): Promise<string | null> {
+    const t = token?.trim().toLowerCase();
+    if (!t || !/^[a-f0-9]{32}$/.test(t)) return null;
+    const [p] = await this.db
+      .select({ metadata: payments.metadata })
+      .from(payments)
+      .where(
+        or(
+          eq(payments.returnToken, t),
+          sql`(metadata::jsonb->>'lemonReturnToken') = ${t}`,
+        ),
+      )
+      .limit(1);
+    if (!p?.metadata) return null;
+    try {
+      const m = JSON.parse(p.metadata) as { mobileResumeUrl?: string };
+      const url = m.mobileResumeUrl?.trim();
+      if (!url) return null;
+      const u = new URL(url);
+      if (u.protocol !== 'exp:' && u.protocol !== 'yamma:') return null;
+      return url;
+    } catch {
+      return null;
+    }
   }
 
   /** Credits restaurant owner's fiat balance (card settlements). */
@@ -44,12 +84,114 @@ export class PaymentsService {
       .where(eq(users.id, owner.id));
   }
 
-  async createPayment(
-    orderId: string,
-    provider: string,
-    userId: string,
-    checkoutSuccessTarget?: 'web' | 'mobile',
-  ) {
+  private resolveLemonRedirectBase(
+    checkoutSuccessTarget: 'web' | 'mobile' | undefined,
+    paymentReturnBaseUrl: string | undefined,
+  ): string {
+    const fe = this.config.frontendUrl.replace(/\/$/, '');
+    if (checkoutSuccessTarget !== 'mobile') {
+      return fe;
+    }
+
+    if (!paymentReturnBaseUrl?.trim()) {
+      try {
+        const api = new URL(this.config.apiUrl);
+        if (
+          api.protocol === 'https:' &&
+          !['localhost', '127.0.0.1', '[::1]'].includes(api.hostname)
+        ) {
+          return api.origin.replace(/\/$/, '');
+        }
+      } catch {
+        /* fall through */
+      }
+      try {
+        const h = new URL(this.config.frontendUrl).hostname;
+        if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]') {
+          throw new BadRequestException(
+            'Mobile card checkout needs a public HTTPS URL for the return page. Set EXPO_PUBLIC_PAYMENT_RETURN_BASE_URL on the mobile app, or use an HTTPS EXPO_PUBLIC_API_URL (e.g. ngrok to port 3001) so the API can serve /payment/app-redirect. FRONTEND_URL is localhost, which the phone cannot open after Lemon Squeezy.',
+          );
+        }
+      } catch (e) {
+        if (e instanceof BadRequestException) throw e;
+      }
+      return fe;
+    }
+
+    let raw = paymentReturnBaseUrl.trim().replace(/\/$/, '');
+    if (!/^[a-z]+:\/\//i.test(raw)) {
+      raw = `https://${raw}`;
+    }
+    let u: URL;
+    try {
+      u = new URL(raw);
+    } catch {
+      throw new BadRequestException(
+        'Invalid paymentReturnBaseUrl. Use a full URL or host your phone can reach (e.g. https://your-next.ngrok-free.app).',
+      );
+    }
+
+    const origin = `${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ''}`;
+
+    if (u.protocol === 'http:') {
+      const okHost = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+      if (!okHost) {
+        throw new BadRequestException('paymentReturnBaseUrl: http is only allowed for localhost');
+      }
+    } else if (u.protocol !== 'https:') {
+      throw new BadRequestException('paymentReturnBaseUrl must use http:// or https://');
+    }
+
+    if (this.config.env === 'production') {
+      let feOrigin: string;
+      try {
+        feOrigin = new URL(this.config.frontendUrl).origin;
+      } catch {
+        feOrigin = '';
+      }
+      let apiOrigin: string;
+      try {
+        apiOrigin = new URL(this.config.apiUrl).origin;
+      } catch {
+        apiOrigin = '';
+      }
+      const allowed = new Set([
+        feOrigin,
+        apiOrigin,
+        ...this.config.paymentReturnOriginAllowlistOrigins,
+      ]);
+      if (!allowed.has(origin)) {
+        throw new ForbiddenException(
+          'paymentReturnBaseUrl origin is not allowed. It must match FRONTEND_URL, API_URL, or PAYMENT_RETURN_ORIGIN_ALLOWLIST.',
+        );
+      }
+    }
+
+    return origin.replace(/\/$/, '');
+  }
+
+  private normalizeMobileAppResumeUrl(
+    raw: string | undefined,
+    checkoutSuccessTarget: 'web' | 'mobile' | undefined,
+  ): string | undefined {
+    if (checkoutSuccessTarget !== 'mobile' || !raw?.trim()) return undefined;
+    const t = raw.trim();
+    if (t.length > 4096) {
+      throw new BadRequestException('mobileAppResumeUrl is too long.');
+    }
+    let u: URL;
+    try {
+      u = new URL(t);
+    } catch {
+      throw new BadRequestException('mobileAppResumeUrl must be a valid URL (from expo-linking).');
+    }
+    if (u.protocol !== 'exp:' && u.protocol !== 'yamma:') {
+      throw new BadRequestException('mobileAppResumeUrl must use exp:// (Expo Go) or yamma:// (dev build).');
+    }
+    return t;
+  }
+
+  async createPayment(orderId: string, provider: string, userId: string, options?: CreatePaymentOptions) {
     if (provider !== 'lemon_squeeze') {
       throw new BadRequestException('Only card checkout (Lemon Squeezy) is available.');
     }
@@ -66,13 +208,35 @@ export class PaymentsService {
       throw new ForbiddenException('Invalid order total');
     }
 
+    const lemonRedirectBase = this.resolveLemonRedirectBase(
+      options?.checkoutSuccessTarget,
+      options?.paymentReturnBaseUrl,
+    );
+
+    const mobileAppResumeUrl = this.normalizeMobileAppResumeUrl(
+      options?.mobileAppResumeUrl,
+      options?.checkoutSuccessTarget,
+    );
+    if (options?.checkoutSuccessTarget === 'mobile' && !mobileAppResumeUrl) {
+      throw new BadRequestException(
+        'mobileAppResumeUrl is required for mobile checkout (Expo Linking.createURL for payment-return).',
+      );
+    }
+
+    const returnToken =
+      options?.checkoutSuccessTarget === 'mobile' ? randomBytes(16).toString('hex').toLowerCase() : undefined;
+
     let result: Awaited<ReturnType<LemonSqueezeProvider['createPayment']>>;
     try {
       result = await this.lemon.createPayment({
         orderId,
         amount,
         currency,
-        checkoutSuccessTarget,
+        checkoutSuccessTarget: options?.checkoutSuccessTarget,
+        lemonRedirectBase,
+        restaurantId: order.restaurantId,
+        returnToken,
+        mobileAppResumeUrl,
       });
     } catch (e) {
       let msg = e instanceof Error ? e.message : 'Payment provider error';
@@ -82,20 +246,56 @@ export class PaymentsService {
       }
       throw new BadGatewayException(msg);
     }
-    await this.db.insert(payments).values({
-      orderId,
-      provider: 'lemon_squeeze',
-      providerPaymentId: result.providerPaymentId,
-      status: result.status,
-      amount: amount.toFixed(2),
-      currency,
-    });
+
+    const metadataPayload =
+      mobileAppResumeUrl != null
+        ? JSON.stringify({
+            mobileResumeUrl: mobileAppResumeUrl,
+            ...(returnToken ? { lemonReturnToken: returnToken } : {}),
+          })
+        : undefined;
+
+    try {
+      await this.db.insert(payments).values({
+        orderId,
+        provider: 'lemon_squeeze',
+        providerPaymentId: result.providerPaymentId,
+        status: result.status,
+        amount: amount.toFixed(2),
+        currency,
+        ...(returnToken ? { returnToken } : {}),
+        ...(metadataPayload ? { metadata: metadataPayload } : {}),
+      });
+    } catch (err: unknown) {
+      const e = err as { code?: string; message?: string };
+      const missingReturnTokenColumn =
+        e?.code === '42703' ||
+        (typeof e?.message === 'string' &&
+          (/return_token/i.test(e.message) || /column .* does not exist/i.test(e.message)));
+      if (missingReturnTokenColumn && metadataPayload) {
+        this.logger.warn(
+          'payments.return_token missing — inserted without column. Run: pnpm run db:migrate:env (backend)',
+        );
+        await this.db.insert(payments).values({
+          orderId,
+          provider: 'lemon_squeeze',
+          providerPaymentId: result.providerPaymentId,
+          status: result.status,
+          amount: amount.toFixed(2),
+          currency,
+          metadata: metadataPayload,
+        });
+      } else {
+        throw err;
+      }
+    }
     return result;
   }
 
   async confirmPayment(orderId: string, status: 'completed' | 'failed') {
     const order = await this.orders.findById(orderId);
     if (!order) throw new NotFoundException('Order not found');
+    this.logger.log(`confirmPayment called orderId=${orderId} paymentStatus=${status} orderStatus=${order.status}`);
 
     await this.db
       .update(payments)
@@ -114,6 +314,9 @@ export class PaymentsService {
           .where(eq(orders.id, orderId));
       });
       await this.orders.notifyRestaurantPaidOrder(orderId);
+      this.logger.log(`order confirmed orderId=${orderId}`);
+    } else {
+      this.logger.log(`confirmPayment skipped orderId=${orderId} paymentStatus=${status} orderStatus=${order.status}`);
     }
   }
 

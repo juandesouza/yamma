@@ -156,10 +156,15 @@ export class LemonSqueezeProvider implements IPaymentProvider {
     }
 
     const cents = Math.max(1, Math.round(input.amount * 100));
-    const base = this.config.frontendUrl.replace(/\/$/, '');
+    const base = input.lemonRedirectBase.replace(/\/$/, '');
+    // Lemon: `redirect_url` max 255 chars — use short `/payment/return/:token`; real `exp://` URL is stored in DB.
     const redirectUrl =
       input.checkoutSuccessTarget === 'mobile'
-        ? `${base}/payment/app-redirect?orderId=${encodeURIComponent(input.orderId)}`
+        ? (() => {
+            const tok = input.returnToken?.trim();
+            if (!tok) throw new Error('Lemon Squeezy: returnToken is required for mobile checkout');
+            return `${base}/payment/return/${encodeURIComponent(tok)}`;
+          })()
         : `${base}/checkout/return?orderId=${encodeURIComponent(input.orderId)}`;
 
     await this.assertVariantMatchesStore(variantId, storeId);
@@ -254,20 +259,33 @@ export class LemonSqueezeProvider implements IPaymentProvider {
     };
   }
 
-  verifyWebhook(payload: string | Buffer, signature: string): boolean {
-    if (!this.webhookSecret) return false;
-    const body = typeof payload === 'string' ? payload : payload.toString('utf8');
-    const hmac = crypto.createHmac('sha256', this.webhookSecret).update(body).digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(signature, 'utf8'), Buffer.from(hmac, 'utf8'));
+  /** Same algorithm as https://docs.lemonsqueezy.com/help/webhooks/signing-requests (hex digest, UTF-8 bytes). */
+  verifyWebhook(payload: string | Buffer, signature: string | undefined): boolean {
+    if (!this.webhookSecret || signature == null || signature === '') return false;
+    const bodyBuf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, 'utf8');
+    const digestHex = crypto.createHmac('sha256', this.webhookSecret).update(bodyBuf).digest('hex');
+    const digestBuf = Buffer.from(digestHex, 'utf8');
+    const sigBuf = Buffer.from(signature.trim(), 'utf8');
+    if (sigBuf.length !== digestBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, digestBuf);
   }
 
   async handleWebhook(payload: unknown): Promise<{ orderId: string; status: 'completed' | 'failed' } | null> {
-    const p = payload as { meta?: { custom_data?: { orderId?: string } }; data?: { attributes?: { status?: string } } };
-    const orderId = p.meta?.custom_data?.orderId;
-    const status = p.data?.attributes?.status;
+    const p = payload as {
+      meta?: { custom_data?: Record<string, unknown> };
+      data?: { type?: string; attributes?: { status?: string } };
+    };
+    const custom = p.meta?.custom_data;
+    const rawOrderId = custom?.orderId ?? custom?.order_id;
+    const orderId = rawOrderId != null && String(rawOrderId).trim() !== '' ? String(rawOrderId).trim() : null;
     if (!orderId) return null;
+
+    // Order-related webhooks ship an `orders` resource; other events may carry unrelated payloads.
+    if (p.data?.type && p.data.type !== 'orders') return null;
+
+    const status = p.data?.attributes?.status;
     if (status === 'paid') return { orderId, status: 'completed' };
-    if (status === 'failed' || status === 'refunded') return { orderId, status: 'failed' };
+    if (status === 'failed' || status === 'refunded' || status === 'voided') return { orderId, status: 'failed' };
     return null;
   }
 }
