@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createDb } from '../db';
 import { orders, orderItems, menuItems, restaurants } from '../db/schema';
-import { and, desc, eq, ne } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { ConfigService } from '../config/config.service';
 import { EventsGateway } from '../events/events.gateway';
 
@@ -109,7 +109,7 @@ export class OrdersService {
       .select({ order: orders, restaurant: restaurants })
       .from(orders)
       .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
-      .where(and(eq(restaurants.ownerId, ownerId), ne(orders.status, 'pending')))
+      .where(eq(restaurants.ownerId, ownerId))
       .orderBy(desc(orders.createdAt))
       .limit(limit);
   }

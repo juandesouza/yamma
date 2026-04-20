@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { apiUrl, authedFetch, messageFromApiBody, postJson } from '../api/client';
+import { ngrokFetchHeaders } from '../config/api';
 import type { AuthUser } from '../types/auth';
 
 const STORAGE_SESSION = 'yamma_session_id';
@@ -59,7 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!sid) return;
         const res = await fetch(apiUrl('/auth/me'), {
           method: 'POST',
-          headers: { Authorization: `Bearer ${sid}` },
+          headers: { ...ngrokFetchHeaders(), Authorization: `Bearer ${sid}` },
         });
         if (cancelled) return;
         if (res.ok) {

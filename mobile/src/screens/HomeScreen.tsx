@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BuyerStackParamList } from '../navigation/types';
-import { API_BASE_URL } from '../config/api';
+import { API_BASE_URL, ngrokFetchHeaders } from '../config/api';
 import { useAuth } from '../auth/AuthContext';
 
 const DEFAULT_LAT = 38.9072;
@@ -65,6 +65,7 @@ export default function HomeScreen() {
     try {
       const res = await fetch(
         `${API_BASE_URL}/restaurants?lat=${DEFAULT_LAT}&lng=${DEFAULT_LNG}&limit=${PAGE_SIZE}&offset=${nextOffset}`,
+        { headers: ngrokFetchHeaders() },
       );
       if (!res.ok) return;
 

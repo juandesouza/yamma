@@ -4,6 +4,7 @@
   "private": true,
   "main": "index.js",
   "scripts": {
+    "sync-ngrok-env": "node scripts/sync-ngrok-env.cjs",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

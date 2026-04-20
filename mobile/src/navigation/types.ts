@@ -13,3 +13,8 @@ export type BuyerStackParamList = {
   Checkout: { restaurantId: string };
   OrderTracking: { orderId: string; restaurantId?: string; clearCartOnEntry?: boolean };
 };
+
+export type SellerStackParamList = {
+  SellerDashboard: undefined;
+  SellerRestaurantProfile: undefined;
+};

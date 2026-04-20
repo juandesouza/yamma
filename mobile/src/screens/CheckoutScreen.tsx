@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,7 +24,7 @@ import {
 } from '../lib/cart';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import { API_BASE_URL } from '../config/api';
+import { API_BASE_URL, ngrokFetchHeaders } from '../config/api';
 import { getMobileLemonReturnBaseUrl } from '../config/paymentReturn';
 
 type CheckoutStep = 'address' | 'payment';
@@ -93,6 +94,7 @@ export default function CheckoutScreen() {
       try {
         const res = await fetch(
           `${API_BASE_URL}/mapbox/geocode?q=${encodeURIComponent(q)}&limit=6`,
+          { headers: ngrokFetchHeaders() },
         );
         const data = await res.json().catch(() => []);
         if (seq !== geocodeSeq.current) return;
@@ -195,7 +197,7 @@ export default function CheckoutScreen() {
       }
       if (poll >= 3 && poll % 3 === 0) {
         try {
-          await fetchAuthed('/payments/dev/confirm-lemon-return', {
+          await fetchAuthed('/payments/lemon/sync-order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ orderId: oid }),
@@ -217,7 +219,7 @@ export default function CheckoutScreen() {
     if (!paymentBridgeBaseUrl) {
       Alert.alert(
         'Card payment setup',
-        'Use a public HTTPS API URL (e.g. ngrok to port 3001), or set EXPO_PUBLIC_PAYMENT_RETURN_BASE_URL to that same origin or to your Next.js HTTPS origin. Restart Expo after changing .env.',
+        'Lemon needs a public HTTPS URL for the post-checkout redirect. You can keep EXPO_PUBLIC_API_URL as your LAN IP for the API — run ngrok http 3001 and set EXPO_PUBLIC_PAYMENT_RETURN_BASE_URL to the https URL ngrok prints (no trailing slash). Or point EXPO_PUBLIC_API_URL at that same https URL. Restart Expo with a clean cache after changing .env.',
       );
       return;
     }
@@ -259,7 +261,18 @@ export default function CheckoutScreen() {
         return;
       }
 
-      const browserResult = await WebBrowser.openAuthSessionAsync(checkoutUrl, successRedirectUrl);
+      /**
+       * Android `openAuthSessionAsync` is a polyfill: it waits for `Linking` with
+       * `event.url.startsWith(returnUrl)`. That event is the **exp:// / yamma://** deep link from the
+       * return bridge, not the https:// bridge URL — using the server https URL never matched, the
+       * session fell through to AppState/dismiss, and Chrome often showed ERR_CONNECTION_CLOSED when
+       * the in-tab page jumped to exp://. iOS uses native ASWebAuthenticationSession and must keep
+       * the https redirect URL Lemon opens after payment.
+       */
+      const authSessionReturnUrl =
+        Platform.OS === 'android' ? Linking.createURL('payment-return') : successRedirectUrl;
+
+      const browserResult = await WebBrowser.openAuthSessionAsync(checkoutUrl, authSessionReturnUrl);
 
       if (browserResult.type === 'cancel' || browserResult.type === 'dismiss') {
         Alert.alert(
@@ -362,9 +375,14 @@ export default function CheckoutScreen() {
             <View style={styles.paymentWarn}>
               <Text style={styles.paymentWarnTitle}>Setup required for card payment</Text>
               <Text style={styles.paymentWarnBody}>
-                Use EXPO_PUBLIC_API_URL with a public HTTPS URL (ngrok to port 3001), or set EXPO_PUBLIC_PAYMENT_RETURN_BASE_URL
-                to that same origin. The API serves /payment/app-redirect so one ngrok tunnel is enough. Restart Expo after
-                changing .env.
+                Your API URL is HTTP (e.g. LAN). Lemon still needs a public HTTPS origin for the return page. Run{' '}
+                <Text style={styles.paymentWarnMono}>ngrok http 3001</Text>, then add to{' '}
+                <Text style={styles.paymentWarnMono}>mobile/.env</Text>:{' '}
+                <Text style={styles.paymentWarnMono}>
+                  EXPO_PUBLIC_PAYMENT_RETURN_BASE_URL=https://…ngrok-free.dev
+                </Text>{' '}
+                (no trailing slash). You can keep <Text style={styles.paymentWarnMono}>EXPO_PUBLIC_API_URL</Text> as your
+                LAN IP — only this variable must be HTTPS. Restart Expo with cache cleared.
               </Text>
             </View>
           ) : null}
@@ -466,5 +484,10 @@ const styles = StyleSheet.create({
   },
   paymentWarnTitle: { color: '#fdba74', fontWeight: '700', fontSize: 15, marginBottom: 6 },
   paymentWarnBody: { color: '#d1d5db', fontSize: 13, lineHeight: 20 },
+  paymentWarnMono: {
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }),
+    fontSize: 12,
+    color: '#fde68a',
+  },
   buttonDisabled: { opacity: 0.65 },
 });

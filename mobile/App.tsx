@@ -10,7 +10,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { StatusBar } from 'expo-status-bar';
 import { YammaLogo } from '@yamma/design-system';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
-import type { AuthStackParamList, BuyerStackParamList } from './src/navigation/types';
+import type { AuthStackParamList, BuyerStackParamList, SellerStackParamList } from './src/navigation/types';
 import { PaymentReturnDeepLink } from './src/navigation/PaymentReturnDeepLink';
 import WelcomeScreen from './src/screens/WelcomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -23,12 +23,13 @@ import CartScreen from './src/screens/CartScreen';
 import CheckoutScreen from './src/screens/CheckoutScreen';
 import OrderTrackingScreen from './src/screens/OrderTrackingScreen';
 import SellerDashboardScreen from './src/screens/SellerDashboardScreen';
+import SellerRestaurantProfileScreen from './src/screens/SellerRestaurantProfileScreen';
 
 const buyerNavigationRef = createNavigationContainerRef<BuyerStackParamList>();
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const BuyerStack = createNativeStackNavigator<BuyerStackParamList>();
-const SellerStack = createNativeStackNavigator();
+const SellerStack = createNativeStackNavigator<SellerStackParamList>();
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -112,6 +113,11 @@ function SellerNavigator() {
           headerTitle: () => <YammaLogo width={110} height={34} />,
           headerBackVisible: false,
         }}
+      />
+      <SellerStack.Screen
+        name="SellerRestaurantProfile"
+        component={SellerRestaurantProfileScreen}
+        options={{ title: 'Restaurant profile' }}
       />
     </SellerStack.Navigator>
   );

@@ -43,14 +43,9 @@ export default function CheckoutReturnPage() {
           window.location.replace(`/order/${oid}`);
           return;
         }
-        if (
-          s === 'pending' &&
-          process.env.NODE_ENV === 'development' &&
-          pollCount >= 3 &&
-          !devConfirmAttempted
-        ) {
+        if (s === 'pending' && pollCount >= 3 && !devConfirmAttempted) {
           devConfirmAttempted = true;
-          const cr = await fetch('/api/payments/dev/confirm-lemon-return', {
+          const cr = await fetch('/api/payments/lemon/sync-order', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',

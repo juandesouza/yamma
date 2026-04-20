@@ -14,3 +14,7 @@ Optional **local Postgres:** [`docker-compose.yml`](docker-compose.yml) + `backe
 When code changes require a running process restart (Nest backend, Next web), **restart those servers yourself** using the project shell (stop listeners on ports **3001** and **3000** if needed, then start again). Do **not** tell the user to restart or paste commands for them to run unless they explicitly prefer to run servers manually.
 
 Root scripts: `pnpm run dev:backend`, `pnpm run dev:web` (from the workspace root).
+
+# Mobile (Expo)
+
+**Do not start Expo or Metro** (`expo start`, `pnpm run dev:mobile`, etc.). The user runs Expo locally so **Expo Go can show the QR code** and the dev experience matches their setup. Only start Expo if they **explicitly** ask you to in that moment.

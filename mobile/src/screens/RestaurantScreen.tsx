@@ -3,7 +3,7 @@ import { ActivityIndicator, FlatList, Image, StyleSheet, Text, TouchableOpacity,
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { BuyerStackParamList } from '../navigation/types';
-import { API_BASE_URL } from '../config/api';
+import { API_BASE_URL, ngrokFetchHeaders } from '../config/api';
 import { addCartLine, cartLineCount } from '../lib/cart';
 
 type Params = { restaurantId: string };
@@ -48,8 +48,8 @@ export default function RestaurantScreen() {
       setLoading(true);
       try {
         const [rRes, mRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/restaurants/${id}`),
-          fetch(`${API_BASE_URL}/restaurants/${id}/menus`),
+          fetch(`${API_BASE_URL}/restaurants/${id}`, { headers: ngrokFetchHeaders() }),
+          fetch(`${API_BASE_URL}/restaurants/${id}/menus`, { headers: ngrokFetchHeaders() }),
         ]);
 
         if (!cancelled && rRes.ok) {

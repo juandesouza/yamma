@@ -25,3 +25,12 @@ export function getApiBaseUrl(): string {
 }
 
 export const API_BASE_URL = getApiBaseUrl();
+
+/**
+ * ngrok’s free tier may return an HTML interstitial unless this header is sent on every request.
+ * Use with `fetch(..., { headers: { ...ngrokFetchHeaders(), ... } })`.
+ */
+export function ngrokFetchHeaders(): Record<string, string> {
+  if (!API_BASE_URL.includes('ngrok')) return {};
+  return { 'ngrok-skip-browser-warning': 'true' };
+}

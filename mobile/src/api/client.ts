@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '../config/api';
+import { API_BASE_URL, ngrokFetchHeaders } from '../config/api';
 
 export function apiUrl(path: string): string {
   const p = path.startsWith('/') ? path : `/${path}`;
@@ -28,7 +28,10 @@ export async function postJson<T>(path: string, body: unknown): Promise<PostJson
   try {
     const res = await fetch(apiUrl(path), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        ...ngrokFetchHeaders(),
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify(body),
     });
     const text = await res.text();
@@ -56,7 +59,7 @@ export async function postJson<T>(path: string, body: unknown): Promise<PostJson
       ok: false,
       status: 0,
       data: {} as T,
-      networkError: `${msg} — is the API running at ${API_BASE_URL}? On a phone set EXPO_PUBLIC_API_URL to your computer's LAN IP.`,
+      networkError: `${msg} — is the API running at ${API_BASE_URL}? If this is an old ngrok URL, run \`ngrok http 3001\` and update EXPO_PUBLIC_API_URL, or use your PC's LAN IP (e.g. http://192.168.x.x:3001).`,
     };
   }
 }
@@ -65,6 +68,9 @@ export function authedFetch(sessionId: string, path: string, init: RequestInit =
   const headers = new Headers(init.headers);
   if (!headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${sessionId}`);
+  }
+  for (const [k, v] of Object.entries(ngrokFetchHeaders())) {
+    if (!headers.has(k)) headers.set(k, v);
   }
   return fetch(apiUrl(path), { ...init, headers });
 }

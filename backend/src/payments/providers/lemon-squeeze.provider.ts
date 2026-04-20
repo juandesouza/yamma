@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '../../config/config.service';
 import type { IPaymentProvider, CreatePaymentInput, PaymentResult } from '../payment-provider.interface';
 import crypto from 'crypto';
@@ -78,6 +78,7 @@ function normalizeLemonNumericId(s: string): string {
 @Injectable()
 export class LemonSqueezeProvider implements IPaymentProvider {
   readonly name = 'lemon_squeeze' as const;
+  private readonly logger = new Logger(LemonSqueezeProvider.name);
   private apiKey: string;
   private webhookSecret: string | undefined;
 
@@ -180,7 +181,8 @@ export class LemonSqueezeProvider implements IPaymentProvider {
               redirect_url: redirectUrl,
             },
             checkout_data: {
-              custom: { orderId: input.orderId },
+              /** Lemon exposes these in webhook `meta.custom_data` (strings). Duplicate keys cover API quirks. */
+              custom: { orderId: input.orderId, order_id: input.orderId },
             },
           },
           relationships: {
@@ -283,9 +285,93 @@ export class LemonSqueezeProvider implements IPaymentProvider {
     // Order-related webhooks ship an `orders` resource; other events may carry unrelated payloads.
     if (p.data?.type && p.data.type !== 'orders') return null;
 
-    const status = p.data?.attributes?.status;
+    const rawStatus = p.data?.attributes?.status;
+    const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase().trim() : '';
     if (status === 'paid') return { orderId, status: 'completed' };
     if (status === 'failed' || status === 'refunded' || status === 'voided') return { orderId, status: 'failed' };
     return null;
+  }
+
+  /**
+   * When webhooks cannot reach the API (localhost, wrong URL, etc.), ask Lemon which orders are paid
+   * and match our pending checkout by store, buyer email, amount, and time.
+   */
+  async lookupPaidOrderForSync(input: {
+    storeId: string;
+    yammaTotalUsd: string;
+    userEmail: string | null;
+    paymentCreatedAt: Date;
+    lemonTestMode: boolean;
+  }): Promise<boolean> {
+    if (!this.apiKey) return false;
+    const expectedCents = Math.round(Number(input.yammaTotalUsd) * 100);
+    if (!Number.isFinite(expectedCents) || expectedCents <= 0) return false;
+
+    const params = new URLSearchParams();
+    params.set('filter[store_id]', String(input.storeId));
+    params.set('page[size]', '40');
+    params.set('sort', '-created_at');
+    const email = input.userEmail?.trim();
+    if (email) {
+      params.set('filter[user_email]', email);
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(`${LEMON_API}/orders?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          Accept: 'application/vnd.api+json',
+        },
+      });
+    } catch (e) {
+      this.logger.warn(`Lemon orders list request failed: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+    const rawText = await res.text();
+    if (!res.ok) {
+      this.logger.warn(`Lemon orders list HTTP ${res.status}: ${rawText.slice(0, 400)}`);
+      return false;
+    }
+    let json: { data?: Array<{ attributes?: Record<string, unknown> }> };
+    try {
+      json = JSON.parse(rawText) as typeof json;
+    } catch {
+      return false;
+    }
+    const rows = json.data ?? [];
+    const payCreated = input.paymentCreatedAt.getTime();
+    const windowStart = payCreated - 3 * 60 * 1000;
+    const windowEnd = payCreated + 45 * 60 * 1000;
+
+    const candidates: { created: number }[] = [];
+    for (const row of rows) {
+      const a = row.attributes ?? {};
+      const st = typeof a.status === 'string' ? a.status.toLowerCase() : '';
+      if (st !== 'paid') continue;
+      const total = typeof a.total === 'number' ? a.total : Number(a.total);
+      if (!Number.isFinite(total) || total !== expectedCents) continue;
+      const tm = Boolean(a.test_mode);
+      if (tm !== input.lemonTestMode) continue;
+      const createdRaw = a.created_at;
+      const createdMs =
+        typeof createdRaw === 'string' ? Date.parse(createdRaw) : createdRaw instanceof Date ? createdRaw.getTime() : NaN;
+      if (!Number.isFinite(createdMs) || createdMs < windowStart || createdMs > windowEnd) continue;
+      candidates.push({ created: createdMs });
+    }
+
+    if (candidates.length === 0) return false;
+    if (!email && candidates.length > 1) {
+      this.logger.warn(
+        'Lemon sync: multiple paid orders match amount/time without user email — refusing ambiguous match',
+      );
+      return false;
+    }
+    candidates.sort((a, b) => Math.abs(a.created - payCreated) - Math.abs(b.created - payCreated));
+    const best = candidates[0]!;
+    if (Math.abs(best.created - payCreated) > 20 * 60 * 1000) {
+      return false;
+    }
+    return true;
   }
 }

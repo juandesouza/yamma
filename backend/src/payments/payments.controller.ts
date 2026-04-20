@@ -103,11 +103,20 @@ export class PaymentsController {
     return { received: true };
   }
 
+  /** Confirms a paid Lemon order when webhooks are slow or unreachable (uses Lemon Orders API). */
+  @Post('lemon/sync-order')
+  @UseGuards(SessionGuard)
+  async syncLemonOrder(@CurrentUser() user: SessionUser, @Body() body: unknown) {
+    const parsed = devConfirmReturnSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.payments.syncLemonOrderAfterCheckout(parsed.data.orderId, user.id);
+  }
+
   @Post('dev/confirm-lemon-return')
   @UseGuards(SessionGuard)
   async devConfirmLemonReturn(@CurrentUser() user: SessionUser, @Body() body: unknown) {
     const parsed = devConfirmReturnSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
-    return this.payments.devConfirmLemonReturn(parsed.data.orderId, user.id);
+    return this.payments.syncLemonOrderAfterCheckout(parsed.data.orderId, user.id);
   }
 }

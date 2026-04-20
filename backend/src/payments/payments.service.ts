@@ -320,11 +320,14 @@ export class PaymentsService {
     }
   }
 
-  /** Local dev fallback when webhooks cannot reach localhost. */
-  async devConfirmLemonReturn(orderId: string, userId: string): Promise<{ status: 'confirmed' | 'already_confirmed' }> {
-    if (process.env.NODE_ENV === 'production') {
-      throw new NotFoundException();
-    }
+  /**
+   * Confirms the order when Lemon shows the payment as paid but our webhook did not run
+   * (localhost, misconfigured URL, etc.). Uses Lemon’s Orders API — not a blind confirm.
+   */
+  async syncLemonOrderAfterCheckout(
+    orderId: string,
+    userId: string,
+  ): Promise<{ status: 'confirmed' | 'already_confirmed' | 'still_pending' }> {
     const order = await this.orders.findById(orderId);
     if (!order) throw new NotFoundException('Order not found');
     if (order.userId !== userId) throw new ForbiddenException('Not your order');
@@ -336,11 +339,36 @@ export class PaymentsService {
       .limit(1);
     if (!p) throw new NotFoundException('No Lemon Squeezy payment found for this order');
 
-    if (order.status === 'confirmed') {
+    if (order.status !== 'pending') {
       return { status: 'already_confirmed' };
+    }
+
+    const storeId = this.config.lemonSqueezeStoreId?.trim();
+    if (!storeId) {
+      this.logger.warn('syncLemonOrderAfterCheckout: LEMON_SQUEEZE_STORE_ID missing');
+      return { status: 'still_pending' };
+    }
+
+    const [u] = await this.db.select({ email: users.email }).from(users).where(eq(users.id, order.userId)).limit(1);
+
+    const matched = await this.lemon.lookupPaidOrderForSync({
+      storeId,
+      yammaTotalUsd: order.total,
+      userEmail: u?.email ?? null,
+      paymentCreatedAt: p.createdAt,
+      lemonTestMode: this.config.lemonSqueezeCheckoutTestMode,
+    });
+
+    if (!matched) {
+      return { status: 'still_pending' };
     }
 
     await this.confirmPayment(orderId, 'completed');
     return { status: 'confirmed' };
+  }
+
+  /** @deprecated Use `syncLemonOrderAfterCheckout` — kept for older clients. */
+  async devConfirmLemonReturn(orderId: string, userId: string) {
+    return this.syncLemonOrderAfterCheckout(orderId, userId);
   }
 }

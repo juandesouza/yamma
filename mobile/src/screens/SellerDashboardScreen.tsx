@@ -10,6 +10,9 @@ import {
   Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
+import type { SellerStackParamList } from '../navigation/types';
 import { useAuth } from '../auth/AuthContext';
 
 type MinePayload = {
@@ -29,7 +32,7 @@ type OrderRow = {
 };
 
 export default function SellerDashboardScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<SellerStackParamList, 'SellerDashboard'>>();
   const { signOut, fetchAuthed } = useAuth();
   const [phase, setPhase] = useState<'loading' | 'setup' | 'orders'>('loading');
   const [mine, setMine] = useState<MinePayload | null>(null);
@@ -42,16 +45,14 @@ export default function SellerDashboardScreen() {
     if (!mineRes.ok) {
       setPhase('setup');
       setMine(null);
+      setOrders([]);
       return;
     }
     const data = (await mineRes.json()) as MinePayload;
     setMine(data);
     const hasRestaurant = Boolean(data?.restaurant?.id);
-    const hasMenuItems = Boolean(
-      Array.isArray(data?.menus) &&
-        data.menus.some((m) => Array.isArray(m.items) && m.items.length > 0),
-    );
-    if (hasRestaurant && hasMenuItems) {
+
+    if (hasRestaurant) {
       const oRes = await fetchAuthed('/orders/restaurant');
       if (oRes.ok) {
         const list = (await oRes.json()) as OrderRow[];
@@ -61,6 +62,7 @@ export default function SellerDashboardScreen() {
       }
       setPhase('orders');
     } else {
+      setOrders([]);
       setPhase('setup');
     }
   }, [fetchAuthed]);
@@ -68,14 +70,23 @@ export default function SellerDashboardScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <TouchableOpacity onPress={() => signOut()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Text style={styles.headerLink}>Log out</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('SellerRestaurantProfile')}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityLabel="Restaurant profile and menu"
+          >
+            <Ionicons name="person-circle-outline" size={28} color="#ff5500" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => signOut()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+            <Text style={styles.headerLink}>Log out</Text>
+          </TouchableOpacity>
+        </View>
       ),
     });
   }, [navigation, signOut]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     void load();
   }, [load]);
 
@@ -118,6 +129,10 @@ export default function SellerDashboardScreen() {
     }
   }, [load]);
 
+  const hasMenuItems = Boolean(
+    mine?.menus?.some((m) => Array.isArray(m.items) && m.items.length > 0),
+  );
+
   if (phase === 'loading') {
     return (
       <View style={styles.centered}>
@@ -134,12 +149,20 @@ export default function SellerDashboardScreen() {
         onRefresh={onRefresh}
         mine={mine}
         onSignOut={signOut}
+        onOpenProfile={() => navigation.navigate('SellerRestaurantProfile')}
       />
     );
   }
 
   return (
     <View style={styles.container}>
+      {!hasMenuItems ? (
+        <View style={styles.banner}>
+          <Text style={styles.bannerText}>
+            Add at least one menu item so buyers can order. Open your profile (icon above) to add dishes and prices.
+          </Text>
+        </View>
+      ) : null}
       <Text style={styles.heading}>Orders</Text>
       <FlatList
         data={orders}
@@ -149,6 +172,7 @@ export default function SellerDashboardScreen() {
         }
         ListEmptyComponent={<Text style={styles.muted}>No orders yet.</Text>}
         renderItem={({ item }) => {
+          const isPendingPayment = item.status === 'pending';
           const canDispatch = item.status === 'confirmed' && !item.courierRequestedAt;
           const waitingDriver = item.status === 'confirmed' && Boolean(item.courierRequestedAt);
           return (
@@ -157,6 +181,11 @@ export default function SellerDashboardScreen() {
                 <Text style={styles.orderId}>#{item.id.slice(0, 8)}</Text>
                 <Text style={styles.orderStatus}>{item.status.replace(/_/g, ' ')}</Text>
               </View>
+              {isPendingPayment ? (
+                <Text style={styles.orderHint}>
+                  Awaiting payment confirmation — it will move to confirmed after the buyer pays (or refresh in a moment).
+                </Text>
+              ) : null}
               {item.deliveryAddress ? <Text style={styles.orderAddress}>{item.deliveryAddress}</Text> : null}
               {item.total ? (
                 <Text style={styles.orderSub}>
@@ -193,11 +222,13 @@ function ScrollableSetup({
   onRefresh,
   mine,
   onSignOut,
+  onOpenProfile,
 }: {
   refreshing: boolean;
   onRefresh: () => void;
   mine: MinePayload | null;
   onSignOut: () => void;
+  onOpenProfile: () => void;
 }) {
   return (
     <FlatList
@@ -210,14 +241,18 @@ function ScrollableSetup({
         <View style={styles.setupBox}>
           <Text style={styles.setupTitle}>Set up your restaurant</Text>
           <Text style={styles.setupBody}>
-            Add your place and menu on the web app (seller setup), then pull to refresh here. Seller guest accounts
-            usually get a demo restaurant automatically—try refreshing.
+            Create your place and menu in the app — open Restaurant profile below — or use the web seller setup, then pull
+            to refresh.
           </Text>
           {mine?.restaurant?.id ? (
             <Text style={styles.setupHint}>
-              Restaurant draft: {mine.restaurant.name}. Add menu items on the web to unlock orders here.
+              Restaurant draft: {mine.restaurant.name}. Add menu items under Restaurant profile to unlock the orders list
+              layout.
             </Text>
           ) : null}
+          <TouchableOpacity style={styles.primaryOutlineBtn} onPress={onOpenProfile} activeOpacity={0.85}>
+            <Text style={styles.primaryOutlineBtnText}>Restaurant profile & menu</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.outlineBtn} onPress={onSignOut}>
             <Text style={styles.outlineBtnText}>Log out</Text>
           </TouchableOpacity>
@@ -232,7 +267,17 @@ const styles = StyleSheet.create({
   centered: { flex: 1, backgroundColor: '#0f1014', justifyContent: 'center', alignItems: 'center', gap: 12 },
   heading: { fontSize: 20, fontWeight: '600', color: '#fff', marginBottom: 12 },
   muted: { color: '#7c7e8c', fontSize: 14, marginTop: 8 },
-  headerLink: { color: '#ff5500', fontWeight: '600', fontSize: 16, marginRight: 8 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 14, marginRight: 4 },
+  headerLink: { color: '#ff5500', fontWeight: '600', fontSize: 16 },
+  banner: {
+    backgroundColor: '#2a1510',
+    borderWidth: 1,
+    borderColor: '#7c2d12',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  bannerText: { color: '#fdba74', fontSize: 13, lineHeight: 18 },
   orderCard: {
     backgroundColor: '#1c1d23',
     borderRadius: 12,
@@ -259,7 +304,16 @@ const styles = StyleSheet.create({
   setupBox: { padding: 16, paddingTop: 24 },
   setupTitle: { fontSize: 22, fontWeight: '600', color: '#fff', marginBottom: 12 },
   setupBody: { fontSize: 15, color: '#9ca3af', lineHeight: 22, marginBottom: 16 },
-  setupHint: { fontSize: 14, color: '#d1d5db', marginBottom: 24 },
+  setupHint: { fontSize: 14, color: '#d1d5db', marginBottom: 16 },
+  primaryOutlineBtn: {
+    alignSelf: 'stretch',
+    backgroundColor: '#ff5500',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  primaryOutlineBtnText: { color: '#0f1014', fontWeight: '700', fontSize: 16 },
   outlineBtn: {
     alignSelf: 'flex-start',
     borderWidth: 1,
