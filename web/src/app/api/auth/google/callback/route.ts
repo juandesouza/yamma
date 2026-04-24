@@ -89,6 +89,8 @@ export async function GET(request: NextRequest) {
       code = 'google-email-not-verified';
     } else if (m.includes('email')) {
       code = 'google-email';
+    } else if (m.includes('yamma_oauth_api:')) {
+      code = 'google-api-not-configured';
     } else if (m.includes('not configured')) {
       code = 'google-not-configured';
     } else if (m.includes('google sign-in server error')) {

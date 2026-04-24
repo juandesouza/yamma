@@ -229,7 +229,9 @@ export class AuthController {
     const clientId = this.config.googleClientId;
     const clientSecret = this.config.googleClientSecret;
     if (!clientId || !clientSecret) {
-      throw new BadRequestException('Google OAuth is not configured on the server.');
+      throw new BadRequestException(
+        'YAMMA_OAUTH_API: Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the API (e.g. Render yamma-api), same Web client as Vercel and Google Cloud.',
+      );
     }
     return { clientId, clientSecret };
   }

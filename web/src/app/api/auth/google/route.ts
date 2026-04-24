@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
   const stateSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
   if (!clientId) {
-    return NextResponse.redirect(new URL('/login?error=google-not-configured', request.url));
+    return NextResponse.redirect(new URL('/login?error=google-web-not-configured', request.url));
   }
   if (!stateSecret) {
     return NextResponse.redirect(

@@ -31,7 +31,12 @@ export function LoginPageClient() {
     'google-email-not-verified': 'Verify your Google account email, then try again, or use email and password.',
     'google-userinfo': 'Could not read your Google profile. Try again or use email and password.',
     'google-email': 'Your Google account email could not be used. Try another account or use email and password.',
-    'google-not-configured': 'Google sign-in is not configured on the server (missing client id/secret).',
+    'google-api-not-configured':
+      'The Yamma **API** on **Render** (yamma-api) is missing **GOOGLE_CLIENT_ID** and/or **GOOGLE_CLIENT_SECRET**. In Render: open **yamma-api** → **Environment** → add the same values as in Vercel and Google Cloud (Web client) → **Save** → **Manual Deploy** or **Restart**.',
+    'google-web-not-configured':
+      'The **Vercel** app is missing **GOOGLE_CLIENT_ID** (add it in Project → **Environment Variables** for Production, then redeploy).',
+    'google-not-configured':
+      'Google sign-in is not fully configured. Add **GOOGLE_CLIENT_ID** and **GOOGLE_CLIENT_SECRET** in **Vercel** (yamma-web) and on **Render** (yamma-api), from the same Google Cloud Web client.',
     'google-missing-web-secret':
       'Web app is missing GOOGLE_CLIENT_SECRET (server env). Copy it from the backend .env into web/.env.local — same value, not NEXT_PUBLIC.',
     'google-api-unreachable':
