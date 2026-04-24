@@ -70,11 +70,13 @@ export class ConfigService {
   }
 
   get googleClientId(): string | undefined {
-    return this.nest.get('GOOGLE_CLIENT_ID', { infer: true });
+    const v = this.nest.get('GOOGLE_CLIENT_ID', { infer: true })?.trim();
+    return v || undefined;
   }
 
   get googleClientSecret(): string | undefined {
-    return this.nest.get('GOOGLE_CLIENT_SECRET', { infer: true });
+    const v = this.nest.get('GOOGLE_CLIENT_SECRET', { infer: true })?.trim();
+    return v || undefined;
   }
 
   /** Client IDs allowed as `aud` on Google ID tokens (web + native + Expo). */
@@ -90,13 +92,14 @@ export class ConfigService {
 
   /** Must match the redirect URI registered in Google Cloud (Next.js route on the frontend). */
   get googleCallbackUrl(): string {
-    return (
-      this.nest.get('GOOGLE_CALLBACK_URL', { infer: true }) ?? `${this.frontendUrl}/api/auth/google/callback`
-    );
+    const explicit = this.nest.get('GOOGLE_CALLBACK_URL', { infer: true })?.trim();
+    if (explicit) return explicit;
+    return `${this.frontendUrl}/api/auth/google/callback`;
   }
 
   get frontendUrl(): string {
-    return this.nest.get('FRONTEND_URL', { infer: true }) ?? 'http://localhost:3000';
+    const v = this.nest.get('FRONTEND_URL', { infer: true })?.trim();
+    return v || 'http://localhost:3000';
   }
 
   get smtpHost(): string | undefined {
