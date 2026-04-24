@@ -44,7 +44,8 @@ export async function GET(request: NextRequest) {
   }
   const returnTo = parsed.returnTo;
 
-  const redirectUri = `${oauthPublicOrigin(request)}/api/auth/google/callback`;
+  const redirectUri =
+    parsed.redirectUri ?? `${oauthPublicOrigin(request)}/api/auth/google/callback`;
 
   let exchange: Response;
   try {

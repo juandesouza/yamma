@@ -21,9 +21,9 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const state = createGoogleOAuthState(returnTo, stateSecret);
   const origin = oauthPublicOrigin(request);
   const callbackUrl = `${origin}/api/auth/google/callback`;
+  const state = createGoogleOAuthState(returnTo, stateSecret, callbackUrl);
 
   const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   authUrl.searchParams.set('client_id', clientId);
