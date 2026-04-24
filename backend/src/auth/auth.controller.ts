@@ -591,22 +591,18 @@ export class AuthController {
       );
     }
     const data = parsed.data;
-    const prefix = this.config.frontendUrl.replace(/\/$/, '');
-    let redirectOk = data.redirectUri.startsWith(prefix);
-    if (!redirectOk) {
-      try {
-        const u = new URL(data.redirectUri);
-        const pathOk = u.pathname === '/api/auth/google/callback';
+    let redirectOk = false;
+    try {
+      const u = new URL(data.redirectUri);
+      const pathOk = u.pathname === '/api/auth/google/callback';
+      if (this.config.env === 'development') {
         const schemeOk = u.protocol === 'http:' || u.protocol === 'https:';
-        if (this.config.env === 'development') {
-          redirectOk = pathOk && schemeOk;
-        } else {
-          const allowed = new URL(prefix);
-          redirectOk = pathOk && schemeOk && u.hostname === allowed.hostname;
-        }
-      } catch {
-        redirectOk = false;
+        redirectOk = pathOk && schemeOk;
+      } else {
+        redirectOk = pathOk && u.protocol === 'https:';
       }
+    } catch {
+      redirectOk = false;
     }
     if (!redirectOk) {
       throw new BadRequestException('Invalid redirect URI');

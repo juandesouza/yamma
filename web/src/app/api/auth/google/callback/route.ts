@@ -77,11 +77,7 @@ export async function GET(request: NextRequest) {
     console.error('[google/callback] exchange failed', exchange.status, msg || rawText.slice(0, 500));
     const m = msg.toLowerCase();
     let code = 'google-sign-in-failed';
-    if (
-      m.includes('redirect_uri_mismatch') ||
-      m.includes('redirect uri') ||
-      m.includes('invalid redirect')
-    ) {
+    if (m.includes('redirect_uri_mismatch')) {
       code = 'google-bad-redirect';
     } else if (m.includes('invalid_grant') || m.includes('bad_verification_code')) {
       code = 'google-token-used';
