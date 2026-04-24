@@ -10,8 +10,8 @@ export async function GET(request: NextRequest) {
   const from = request.nextUrl.searchParams.get('from');
   const returnTo = from === 'register' ? '/register?loggedIn=1' : '/?loggedIn=1';
 
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const stateSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const stateSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
   if (!clientId) {
     return NextResponse.redirect(new URL('/login?error=google-not-configured', request.url));
   }

@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
   const code = request.nextUrl.searchParams.get('code');
   const stateParam = request.nextUrl.searchParams.get('state');
-  const stateSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const stateSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
 
   if (!code || !stateParam) {
     console.error('[google/callback] missing code or state');
