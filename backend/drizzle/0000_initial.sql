@@ -301,22 +301,155 @@ EXCEPTION
  WHEN undefined_table THEN null;
 END $$;
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "driver_assignments_order_idx" ON "driver_assignments" USING btree ("order_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "driver_assignments_driver_idx" ON "driver_assignments" USING btree ("driver_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "drivers_external_id_idx" ON "drivers" USING btree ("external_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "drivers_status_idx" ON "drivers" USING btree ("status");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "menu_items_menu_idx" ON "menu_items" USING btree ("menu_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "onramp_intents_user_idx" ON "onramp_intents" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "onramp_intents_order_idx" ON "onramp_intents" USING btree ("order_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "onramp_intents_status_idx" ON "onramp_intents" USING btree ("status");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "order_items_order_idx" ON "order_items" USING btree ("order_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "orders_user_idx" ON "orders" USING btree ("user_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "orders_restaurant_idx" ON "orders" USING btree ("restaurant_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "orders_status_idx" ON "orders" USING btree ("status");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "orders_created_idx" ON "orders" USING btree ("created_at");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "payments_order_idx" ON "payments" USING btree ("order_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "payments_provider_id_idx" ON "payments" USING btree ("provider_payment_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "restaurants_owner_idx" ON "restaurants" USING btree ("owner_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "restaurants_slug_idx" ON "restaurants" USING btree ("slug");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "reviews_restaurant_idx" ON "reviews" USING btree ("restaurant_id");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "reviews_order_idx" ON "reviews" USING btree ("order_id");
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "driver_assignments_order_idx" ON "driver_assignments" USING btree ("order_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "driver_assignments_driver_idx" ON "driver_assignments" USING btree ("driver_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "drivers_external_id_idx" ON "drivers" USING btree ("external_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "drivers_status_idx" ON "drivers" USING btree ("status");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "menu_items_menu_idx" ON "menu_items" USING btree ("menu_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "onramp_intents_user_idx" ON "onramp_intents" USING btree ("user_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "onramp_intents_order_idx" ON "onramp_intents" USING btree ("order_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "onramp_intents_status_idx" ON "onramp_intents" USING btree ("status");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "order_items_order_idx" ON "order_items" USING btree ("order_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "orders_user_idx" ON "orders" USING btree ("user_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "orders_restaurant_idx" ON "orders" USING btree ("restaurant_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "orders_status_idx" ON "orders" USING btree ("status");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "orders_created_idx" ON "orders" USING btree ("created_at");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "payments_order_idx" ON "payments" USING btree ("order_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "payments_provider_id_idx" ON "payments" USING btree ("provider_payment_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "restaurants_owner_idx" ON "restaurants" USING btree ("owner_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "restaurants_slug_idx" ON "restaurants" USING btree ("slug");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "reviews_restaurant_idx" ON "reviews" USING btree ("restaurant_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ EXECUTE 'CREATE INDEX IF NOT EXISTS "reviews_order_idx" ON "reviews" USING btree ("order_id");';
+EXCEPTION
+ WHEN duplicate_object THEN null;
+ WHEN undefined_column THEN null;
+ WHEN undefined_table THEN null;
+END $$;
+--> statement-breakpoint
