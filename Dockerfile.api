@@ -1,0 +1,21 @@
+# Production API image (Nest). Build from monorepo root:
+#   docker build -f Dockerfile.api -t yamma-api .
+# Render API service: see docs/DEPLOY.md
+FROM node:22-bookworm-slim AS runner
+WORKDIR /app
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY backend ./backend
+
+RUN corepack enable pnpm \
+  && pnpm install --frozen-lockfile \
+  && pnpm --filter backend run build
+
+WORKDIR /app/backend
+
+ENV NODE_ENV=production
+# Render sets PORT; keep 8080 as default for local docker run
+ENV PORT=8080
+EXPOSE 8080
+
+CMD ["node", "dist/main.js"]

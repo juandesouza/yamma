@@ -24,6 +24,10 @@ pnpm run dev:web
 
 Optional local Postgres: `docker compose up -d` and `cp backend/.env.local.example backend/.env.local` (overrides `DATABASE_URL`). See [docs/SETUP.md](docs/SETUP.md).
 
+## Deploy (Vercel + Render + nHost)
+
+Typical production layout: **Next.js on Vercel** (`web/`), **Nest API on Render** (Docker using [`Dockerfile.api`](Dockerfile.api)), **Postgres on nHost** (`DATABASE_URL`). Step-by-step env and commands: [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Tech stack
 
 - **Language:** TypeScript everywhere
