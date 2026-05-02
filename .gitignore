@@ -15,3 +15,5 @@ coverage
 
 # Local tooling binary (e.g. nhost CLI) — do not commit
 /cli
+
+.vercel

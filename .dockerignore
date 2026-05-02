@@ -1,0 +1,16 @@
+# Context for Dockerfile.api (repo root)
+.git
+.github
+**/.next
+**/dist
+node_modules
+web
+mobile
+design-system
+.env
+**/.env
+.env.*
+*.log
+coverage
+.turbo
+cli

@@ -15,8 +15,17 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const apiOrigin = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '');
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {apiOrigin ? (
+          <>
+            <link rel="preconnect" href={apiOrigin} crossOrigin="anonymous" />
+            <link rel="dns-prefetch" href={apiOrigin} />
+          </>
+        ) : null}
+      </head>
       <body>
         <Script id="yamma-theme-init" strategy="beforeInteractive">
           {`(function(){try{var t=localStorage.getItem('yamma-color-mode');document.documentElement.setAttribute('data-theme',t==='light'||t==='dark'?t:'dark');}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`}

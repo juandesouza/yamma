@@ -1,8 +1,9 @@
 import { defineConfig } from 'drizzle-kit';
 import * as dotenv from 'dotenv';
 
-dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
+/** Always resolve env from this package (`backend/`), not `process.cwd()` (root vs backend breaks migrate). */
+dotenv.config({ path: `${__dirname}/.env` });
+dotenv.config({ path: `${__dirname}/.env.local`, override: true });
 
 /** Migrations in `./drizzle` are generated from `src/db/schema.ts` and must match Nhost Postgres `public` tables. */
 export default defineConfig({

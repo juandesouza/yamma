@@ -35,6 +35,13 @@ Use `pnpm run db:generate` after you change `schema.ts`, then commit new files u
 
 **If migrate fails with “type … already exists”** (schema was applied earlier via `db:push`): run `pnpm run db:push:env` once to align columns, or use a fresh database and `db:migrate:env`.
 
+### Troubleshooting: `ECONNREFUSED` on `127.0.0.1:5432` or `::1:5432`
+
+That means the client is trying **local** Postgres (default fallback or `backend/.env.local`). Common cases:
+
+- You have **`backend/.env.local`** with `DATABASE_URL=...@localhost:5432...` (Docker/local) but **`docker compose` is not running** → start it (`docker compose up -d` from the repo root) or remove/rename `.env.local` while working against nHost.
+- You want to migrate **nHost** but `.env.local` overrides `DATABASE_URL` → use **`pnpm run db:migrate:env`** (reads `backend/.env` only).
+
 ### Troubleshooting: `getaddrinfo ENOTFOUND` (database host)
 
 If `pnpm run db:restaurants-status` or the backend fails with **ENOTFOUND** for the database hostname:

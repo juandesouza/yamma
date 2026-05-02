@@ -26,11 +26,31 @@ interface MapboxGeocodeBody {
   features?: MapboxPlaceFeature[];
 }
 
+/** Photon (Komoot) GeoJSON — https://photon.komoot.io */
+interface PhotonFeatureCollection {
+  features?: Array<{
+    geometry?: { type?: string; coordinates?: [number, number] };
+    properties?: Record<string, unknown>;
+  }>;
+}
+
+/** BigDataCloud reverse-geocode-client (no API key; coarse address when Photon/OSM fail). */
+interface BigDataCloudReverse {
+  latitude?: number;
+  longitude?: number;
+  city?: string;
+  locality?: string;
+  principalSubdivision?: string;
+  countryName?: string;
+  postcode?: string;
+}
+
 @Injectable()
 export class MapboxService {
   private readonly log = new Logger(MapboxService.name);
   /** Public Nominatim — heavily rate-limits shared cloud IPs (e.g. Render). Use MAPBOX_ACCESS_TOKEN in production. */
   private readonly nominatimBase = 'https://nominatim.openstreetmap.org';
+  private readonly photonBase = 'https://photon.komoot.io';
   private readonly osrmBase = 'https://router.project-osrm.org';
   /** https://operations.osmfoundation.org/policies/nominatim/ — identify app clearly */
   private readonly nominatimUserAgent =
@@ -122,6 +142,142 @@ export class MapboxService {
     return out;
   }
 
+  /** Photon reverse — good coverage in Europe/US; sparse in some rural areas. */
+  private formatPhotonAddress(props: Record<string, unknown>): string {
+    const hn = props.housenumber != null ? String(props.housenumber) : '';
+    const st = props.street != null ? String(props.street) : '';
+    const line1 = [hn, st].filter(Boolean).join(' ').trim();
+    const localityRaw =
+      props.city ?? props.town ?? props.village ?? props.locality ?? props.name;
+    const parts: string[] = [];
+    if (line1) parts.push(line1);
+    else if (props.name) parts.push(String(props.name));
+    const locStr = localityRaw != null ? String(localityRaw) : '';
+    if (locStr && locStr !== parts[0]) parts.push(locStr);
+    if (props.district) parts.push(String(props.district));
+    if (props.state) parts.push(String(props.state));
+    if (props.postcode) parts.push(String(props.postcode));
+    if (props.country) parts.push(String(props.country));
+    const seen = new Set<string>();
+    const deduped = parts.filter((p) => {
+      const k = p.toLowerCase();
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    return deduped.join(', ');
+  }
+
+  private photonFeatureToGeocode(feature: NonNullable<PhotonFeatureCollection['features']>[0]): GeocodeResult | null {
+    const coords = feature.geometry?.coordinates;
+    if (!Array.isArray(coords) || coords.length < 2) return null;
+    const [lng, lat] = coords;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const props = feature.properties ?? {};
+    const address = this.formatPhotonAddress(props);
+    if (!address) return null;
+    return {
+      address,
+      latitude: lat,
+      longitude: lng,
+      placeName: address,
+    };
+  }
+
+  async reverseWithPhoton(lat: number, lng: number): Promise<GeocodeResult | null> {
+    const url = `${this.photonBase}/reverse?${new URLSearchParams({
+      lat: String(lat),
+      lon: String(lng),
+    }).toString()}`;
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const bodyText = await res.text();
+      if (!res.ok) {
+        this.log.warn(`Photon reverse HTTP ${res.status}: ${bodyText.slice(0, 120)}`);
+        return null;
+      }
+      let data: PhotonFeatureCollection;
+      try {
+        data = JSON.parse(bodyText) as PhotonFeatureCollection;
+      } catch {
+        return null;
+      }
+      const f = data.features?.[0];
+      return f ? this.photonFeatureToGeocode(f) : null;
+    } catch (e) {
+      this.log.warn(`Photon reverse failed: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  }
+
+  /** Works without API key; complements Photon for rural / global coords. */
+  async reverseWithBigDataCloud(lat: number, lng: number): Promise<GeocodeResult | null> {
+    const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?${new URLSearchParams({
+      latitude: String(lat),
+      longitude: String(lng),
+      localityLanguage: 'en',
+    }).toString()}`;
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const bodyText = await res.text();
+      if (!res.ok) {
+        this.log.warn(`BigDataCloud reverse HTTP ${res.status}: ${bodyText.slice(0, 120)}`);
+        return null;
+      }
+      let data: BigDataCloudReverse;
+      try {
+        data = JSON.parse(bodyText) as BigDataCloudReverse;
+      } catch {
+        return null;
+      }
+      const city = data.city ?? data.locality;
+      const address = [city, data.principalSubdivision, data.postcode, data.countryName].filter(
+        (p): p is string => typeof p === 'string' && p.length > 0,
+      ).join(', ');
+      if (!address) return null;
+      const outLat = Number(data.latitude ?? lat);
+      const outLng = Number(data.longitude ?? lng);
+      return {
+        address,
+        latitude: Number.isFinite(outLat) ? outLat : lat,
+        longitude: Number.isFinite(outLng) ? outLng : lng,
+        placeName: address,
+      };
+    } catch (e) {
+      this.log.warn(`BigDataCloud reverse failed: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  }
+
+  async geocodeWithPhoton(q: string, limit: number): Promise<GeocodeResult[]> {
+    const url = `${this.photonBase}/api/?${new URLSearchParams({
+      q: q.trim(),
+      limit: String(Math.min(10, Math.max(1, limit))),
+      lang: 'en',
+    }).toString()}`;
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const bodyText = await res.text();
+      if (!res.ok) return [];
+      let data: PhotonFeatureCollection;
+      try {
+        data = JSON.parse(bodyText) as PhotonFeatureCollection;
+      } catch {
+        return [];
+      }
+      const list = Array.isArray(data.features) ? data.features : [];
+      const out: GeocodeResult[] = [];
+      for (const f of list) {
+        const row = this.photonFeatureToGeocode(f);
+        if (row) out.push(row);
+      }
+      return out;
+    } catch (e) {
+      this.log.warn(`Photon geocode failed: ${e instanceof Error ? e.message : String(e)}`);
+      return [];
+    }
+  }
+
   async reverseWithMapbox(lat: number, lng: number): Promise<GeocodeResult | null> {
     const url = this.mapboxReverseUrl(lat, lng);
     if (!url) return null;
@@ -176,6 +332,9 @@ export class MapboxService {
       if (fromMb.length) return fromMb;
     }
 
+    const fromPhoton = await this.geocodeWithPhoton(q, limit);
+    if (fromPhoton.length) return fromPhoton;
+
     const url = `${this.nominatimBase}/search?${new URLSearchParams({
       q,
       format: 'jsonv2',
@@ -201,44 +360,60 @@ export class MapboxService {
     const k = this.memoKey(lat, lng);
     if (this.reverseMemo.has(k)) return this.reverseMemo.get(k) ?? null;
 
-    if (this.config.mapboxToken) {
-      try {
-        const fromMb = await this.reverseWithMapbox(lat, lng);
-        if (fromMb?.address) {
-          this.rememberReverse(lat, lng, fromMb);
-          return fromMb;
+    try {
+      if (this.config.mapboxToken) {
+        try {
+          const fromMb = await this.reverseWithMapbox(lat, lng);
+          if (fromMb?.address) {
+            this.rememberReverse(lat, lng, fromMb);
+            return fromMb;
+          }
+        } catch (e) {
+          this.log.warn(`Mapbox reverse threw: ${e instanceof Error ? e.message : String(e)}`);
         }
-      } catch (e) {
-        this.log.warn(`Mapbox reverse threw: ${e instanceof Error ? e.message : String(e)}`);
       }
-    }
 
-    const url = `${this.nominatimBase}/reverse?${new URLSearchParams({
-      lat: String(lat),
-      lon: String(lng),
-      format: 'jsonv2',
-      addressdetails: '0',
-    }).toString()}`;
-    const data = await this.nominatimFetchJson(url, 'reverse');
-    if (!data || typeof data !== 'object') {
+      const [fromPhoton, fromBdc] = await Promise.all([
+        this.reverseWithPhoton(lat, lng),
+        this.reverseWithBigDataCloud(lat, lng),
+      ]);
+      const fromFallback = fromPhoton ?? fromBdc;
+      if (fromFallback?.address) {
+        this.rememberReverse(lat, lng, fromFallback);
+        return fromFallback;
+      }
+
+      const url = `${this.nominatimBase}/reverse?${new URLSearchParams({
+        lat: String(lat),
+        lon: String(lng),
+        format: 'jsonv2',
+        addressdetails: '0',
+      }).toString()}`;
+      const data = await this.nominatimFetchJson(url, 'reverse');
+      if (!data || typeof data !== 'object') {
+        this.rememberReverse(lat, lng, null);
+        return null;
+      }
+      const raw = data as { display_name?: string; lat?: string; lon?: string };
+      if (!raw.display_name) {
+        this.rememberReverse(lat, lng, null);
+        return null;
+      }
+      const parsed: GeocodeResult = {
+        address: raw.display_name,
+        longitude: Number(raw.lon),
+        latitude: Number(raw.lat),
+        placeName: raw.display_name,
+      };
+      const value =
+        Number.isFinite(parsed.latitude) && Number.isFinite(parsed.longitude) ? parsed : null;
+      this.rememberReverse(lat, lng, value);
+      return value;
+    } catch (e) {
+      this.log.warn(`reverseGeocode failed: ${e instanceof Error ? e.message : String(e)}`);
       this.rememberReverse(lat, lng, null);
       return null;
     }
-    const raw = data as { display_name?: string; lat?: string; lon?: string };
-    if (!raw.display_name) {
-      this.rememberReverse(lat, lng, null);
-      return null;
-    }
-    const parsed: GeocodeResult = {
-      address: raw.display_name,
-      longitude: Number(raw.lon),
-      latitude: Number(raw.lat),
-      placeName: raw.display_name,
-    };
-    const value =
-      Number.isFinite(parsed.latitude) && Number.isFinite(parsed.longitude) ? parsed : null;
-    this.rememberReverse(lat, lng, value);
-    return value;
   }
 
   async getDistanceAndEta(

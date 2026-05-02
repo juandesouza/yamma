@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Button } from '@yamma/design-system';
 import { getCurrentUser, getSellerRestaurantState } from '@/lib/server-auth';
+import { GuestEntryButtons } from './guest-entry-buttons';
 import { HomeRestaurantGrid } from './home-restaurant-grid';
 
 export default async function HomePage({
@@ -79,20 +80,7 @@ export default async function HomePage({
             <p className="mb-3 text-center text-sm text-[var(--yamma-text-secondary)]">
               If you want to try the app without signing up, choose a guest mode
             </p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <a
-                href={`/api/auth/guest-login?role=buyer&redirect=${encodeURIComponent('/?loggedIn=1')}`}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--yamma-border-muted)] bg-[var(--yamma-button-secondary-bg)] px-4 py-2.5 text-base font-medium text-[var(--yamma-text)] transition-all duration-200 hover:bg-[var(--yamma-button-secondary-hover)] active:scale-[0.98]"
-              >
-                Enter as buyer guest
-              </a>
-              <a
-                href={`/api/auth/guest-login?role=seller&redirect=${encodeURIComponent('/seller/orders')}`}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--yamma-border-muted)] bg-[var(--yamma-surface)] px-4 py-2.5 text-base font-medium text-[var(--yamma-text-secondary)] transition-all duration-200 hover:border-[var(--yamma-primary)] hover:text-[var(--yamma-text)] active:scale-[0.98]"
-              >
-                Enter as seller guest
-              </a>
-            </div>
+            <GuestEntryButtons />
           </div>
         ) : (
           <>
