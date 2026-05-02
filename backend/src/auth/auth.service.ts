@@ -29,21 +29,27 @@ export class AuthService {
 
   async validateSession(sessionId: string): Promise<{ user: User } | null> {
     if (!sessionId) return null;
-    const [sessionRow] = await this.db
-      .select()
+    const [row] = await this.db
+      .select({
+        id: users.id,
+        email: users.email,
+        phone: users.phone,
+        name: users.name,
+        avatarUrl: users.avatarUrl,
+        role: users.role,
+      })
       .from(sessions)
+      .innerJoin(users, eq(sessions.userId, users.id))
       .where(and(eq(sessions.id, sessionId), gt(sessions.expiresAt, new Date())))
       .limit(1);
-    if (!sessionRow) return null;
-    const [userRow] = await this.db.select().from(users).where(eq(users.id, sessionRow.userId)).limit(1);
-    if (!userRow) return null;
+    if (!row) return null;
     const user: User = {
-      id: userRow.id,
-      email: userRow.email ?? undefined,
-      phone: userRow.phone ?? undefined,
-      name: userRow.name,
-      avatarUrl: userRow.avatarUrl ?? undefined,
-      role: userRow.role as User['role'],
+      id: row.id,
+      email: row.email ?? undefined,
+      phone: row.phone ?? undefined,
+      name: row.name,
+      avatarUrl: row.avatarUrl ?? undefined,
+      role: row.role as User['role'],
     };
     return { user };
   }

@@ -14,7 +14,7 @@ import type { Role } from '../auth/auth.types';
 import {
   BUYER_GUEST_USER_EMAIL,
   BUYER_GUEST_USER_NAME,
-  GUEST_INTERNAL_PASSWORD,
+  GUEST_PASSWORD_BCRYPT_HASH,
   isGuestUserEmail,
   SELLER_GUEST_USER_EMAIL,
   SELLER_GUEST_USER_NAME,
@@ -79,12 +79,11 @@ export class UsersService {
         role: existing.role as Role,
       };
     }
-    const passwordHash = await bcrypt.hash(GUEST_INTERNAL_PASSWORD, SALT_ROUNDS);
     const [u] = await this.db
       .insert(users)
       .values({
         email: targetEmail,
-        passwordHash,
+        passwordHash: GUEST_PASSWORD_BCRYPT_HASH,
         name: targetName,
         role: targetRole,
       })

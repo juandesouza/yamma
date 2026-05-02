@@ -651,12 +651,16 @@ export class AuthController {
   @UseGuards(SessionGuard)
   @HttpCode(HttpStatus.OK)
   async me(@CurrentUser() user: SessionUser) {
+    /** Avoid an extra DB round-trip on every page load — balance only matters for sellers */
+    if (user.role !== 'restaurant') {
+      return { user };
+    }
     const row = await this.users.findById(user.id);
     if (!row) return { user };
     return {
       user: {
         ...user,
-        fiatBalance: row.role === 'restaurant' ? (row.fiatBalance ?? '0.00') : undefined,
+        fiatBalance: row.fiatBalance ?? '0.00',
       },
     };
   }
