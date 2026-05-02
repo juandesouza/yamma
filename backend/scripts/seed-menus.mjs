@@ -3,8 +3,10 @@ import { Client } from 'pg';
 import { randomUUID } from 'crypto';
 import { printDbConnectionHints, pgSslForUrl } from './db-errors.mjs';
 
-dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
-dotenv.config({ path: new URL('../.env.local', import.meta.url).pathname, override: true });
+if (!process.env.DATABASE_URL) {
+  dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
+  dotenv.config({ path: new URL('../.env.local', import.meta.url).pathname, override: true });
+}
 
 const dbUrl = process.env.DATABASE_URL;
 if (!dbUrl) {

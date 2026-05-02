@@ -220,20 +220,30 @@ export function HomeRestaurantGrid() {
       ) : null}
 
       {!hint && !error && restaurants.length === 0 ? (
-        <div className="mx-auto flex max-w-md flex-col gap-2 py-12 text-center text-[var(--yamma-text-muted)]">
-          <p>No restaurants in the database yet.</p>
+        <div className="mx-auto flex max-w-xl flex-col gap-3 py-12 text-center text-[var(--yamma-text-muted)]">
+          <p>No restaurants to show.</p>
           <p className="text-sm text-[var(--yamma-text-secondary)]">
-            Production / hosted DB (<code className="text-xs">backend/.env</code> URL):{' '}
-            <code className="rounded bg-[var(--yamma-surface)] px-1.5 py-0.5 text-xs">
-              pnpm --filter backend run seed:restaurants:env
-            </code>
+            Only venues with at least one <strong className="font-medium">available menu item</strong> appear here.
+            Seed demo data from the <strong className="font-medium">monorepo root</strong> (
+            <code className="rounded px-0.5 text-xs">backend/.env</code> must point at this app&apos;s{' '}
+            <code className="rounded px-0.5 text-xs">DATABASE_URL</code> for production):
           </p>
-          <p className="text-sm text-[var(--yamma-text-secondary)]">
-            Local (uses <code className="text-xs">.env.local</code> Docker if present):{' '}
-            <code className="rounded bg-[var(--yamma-surface)] px-1.5 py-0.5 text-xs">
-              pnpm --filter backend run seed:restaurants
-            </code>
-          </p>
+          <div>
+            <span className="text-xs text-[var(--yamma-text-muted)]">Hosted DB (ignores .env.local)</span>
+            <div className="mt-1 max-w-full overflow-x-auto rounded-md border border-[var(--yamma-border)] bg-[var(--yamma-surface)] px-3 py-2 text-left">
+              <code className="block font-mono text-xs text-[var(--yamma-text-secondary)] whitespace-nowrap">
+                pnpm --filter backend run seed:buyer-demo:env
+              </code>
+            </div>
+          </div>
+          <div>
+            <span className="text-xs text-[var(--yamma-text-muted)]">Local Docker (uses .env.local if present)</span>
+            <div className="mt-1 max-w-full overflow-x-auto rounded-md border border-[var(--yamma-border)] bg-[var(--yamma-surface)] px-3 py-2 text-left">
+              <code className="block font-mono text-xs text-[var(--yamma-text-secondary)] whitespace-nowrap">
+                pnpm --filter backend run seed:buyer-demo
+              </code>
+            </div>
+          </div>
         </div>
       ) : null}
     </>

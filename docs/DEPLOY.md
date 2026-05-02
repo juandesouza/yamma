@@ -22,19 +22,27 @@ This repo is a **pnpm monorepo**. Production split:
 
    (`backend/.env` or env must point at nHost when you run this.)
 
-### Demo restaurants (buyer homepage)
+### Demo data (buyer homepage)
 
-After migrations, the DB may be empty. Seed fake venues (marked `[FAKE]` in the name):
+After migrations, the DB may be empty. The public restaurant list **only includes venues that have at least one available menu item** (`findNearby` in the API filters on `menu_items`).
 
-- **Hosted DB (uses `DATABASE_URL` in `backend/.env` only, ignores `.env.local`):**
+Seed fake venues (names end with `[FAKE]`) **and** menus:
+
+- **Hosted DB** (`DATABASE_URL` in `backend/.env` only; ignores `.env.local`):
 
   ```bash
-  pnpm --filter backend run seed:restaurants:env
+  pnpm --filter backend run seed:buyer-demo:env
   ```
 
-- **Local dev** (optional Docker URL from `backend/.env.local`): `pnpm --filter backend run seed:restaurants`
+- **Local dev** (uses `backend/.env.local` Docker URL when present):
 
-Run from the **monorepo root**. This can take ~30–90s on a remote Postgres.
+  ```bash
+  pnpm --filter backend run seed:buyer-demo
+  ```
+
+Run from the **monorepo root**. The restaurant insert phase can take ~30–90s on remote Postgres; menu seeding adds more round-trips.
+
+To run steps separately: `seed:restaurants:env` then `seed:menus:env` (or the non-`:env` variants locally).
 
 ---
 
