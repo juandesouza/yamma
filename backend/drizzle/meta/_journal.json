@@ -43,6 +43,13 @@
       "when": 1775780916000,
       "tag": "0005_orders_delivery_coordinates",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777765200000,
+      "tag": "0006_orders_currency_column",
+      "breakpoints": true
     }
   ]
 }

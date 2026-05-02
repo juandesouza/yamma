@@ -383,32 +383,9 @@ export class MapboxService {
         return fromFallback;
       }
 
-      const url = `${this.nominatimBase}/reverse?${new URLSearchParams({
-        lat: String(lat),
-        lon: String(lng),
-        format: 'jsonv2',
-        addressdetails: '0',
-      }).toString()}`;
-      const data = await this.nominatimFetchJson(url, 'reverse');
-      if (!data || typeof data !== 'object') {
-        this.rememberReverse(lat, lng, null);
-        return null;
-      }
-      const raw = data as { display_name?: string; lat?: string; lon?: string };
-      if (!raw.display_name) {
-        this.rememberReverse(lat, lng, null);
-        return null;
-      }
-      const parsed: GeocodeResult = {
-        address: raw.display_name,
-        longitude: Number(raw.lon),
-        latitude: Number(raw.lat),
-        placeName: raw.display_name,
-      };
-      const value =
-        Number.isFinite(parsed.latitude) && Number.isFinite(parsed.longitude) ? parsed : null;
-      this.rememberReverse(lat, lng, value);
-      return value;
+      /** Do not call Nominatim for reverse from cloud hosts (Render/Vercel): shared egress IPs get 429 instantly. */
+      this.rememberReverse(lat, lng, null);
+      return null;
     } catch (e) {
       this.log.warn(`reverseGeocode failed: ${e instanceof Error ? e.message : String(e)}`);
       this.rememberReverse(lat, lng, null);
