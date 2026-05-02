@@ -19,6 +19,7 @@
     "nhost:link": "node scripts/run-nhost.mjs link",
     "nhost:install": "node scripts/install-nhost-cli.mjs",
     "seed:restaurants": "node scripts/seed-restaurants.mjs",
+    "seed:restaurants:env": "node scripts/seed-restaurants-env.mjs",
     "seed:menus": "node scripts/seed-menus.mjs",
     "db:restaurants-status": "node scripts/db-restaurants-status.mjs",
     "db:fix-restaurant-images": "node scripts/update-restaurant-images.mjs",

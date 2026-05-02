@@ -220,12 +220,21 @@ export function HomeRestaurantGrid() {
       ) : null}
 
       {!hint && !error && restaurants.length === 0 ? (
-        <p className="py-12 text-center text-[var(--yamma-text-muted)]">
-          No restaurants found. From the repo root run:{' '}
-          <code className="rounded bg-[var(--yamma-surface)] px-1.5 py-0.5 text-xs text-[var(--yamma-text-secondary)]">
-            pnpm --filter backend run seed:restaurants
-          </code>
-        </p>
+        <div className="mx-auto flex max-w-md flex-col gap-2 py-12 text-center text-[var(--yamma-text-muted)]">
+          <p>No restaurants in the database yet.</p>
+          <p className="text-sm text-[var(--yamma-text-secondary)]">
+            Production / hosted DB (<code className="text-xs">backend/.env</code> URL):{' '}
+            <code className="rounded bg-[var(--yamma-surface)] px-1.5 py-0.5 text-xs">
+              pnpm --filter backend run seed:restaurants:env
+            </code>
+          </p>
+          <p className="text-sm text-[var(--yamma-text-secondary)]">
+            Local (uses <code className="text-xs">.env.local</code> Docker if present):{' '}
+            <code className="rounded bg-[var(--yamma-surface)] px-1.5 py-0.5 text-xs">
+              pnpm --filter backend run seed:restaurants
+            </code>
+          </p>
+        </div>
       ) : null}
     </>
   );

@@ -22,6 +22,20 @@ This repo is a **pnpm monorepo**. Production split:
 
    (`backend/.env` or env must point at nHost when you run this.)
 
+### Demo restaurants (buyer homepage)
+
+After migrations, the DB may be empty. Seed fake venues (marked `[FAKE]` in the name):
+
+- **Hosted DB (uses `DATABASE_URL` in `backend/.env` only, ignores `.env.local`):**
+
+  ```bash
+  pnpm --filter backend run seed:restaurants:env
+  ```
+
+- **Local dev** (optional Docker URL from `backend/.env.local`): `pnpm --filter backend run seed:restaurants`
+
+Run from the **monorepo root**. This can take ~30–90s on a remote Postgres.
+
 ---
 
 ## 2. Render (backend)

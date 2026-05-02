@@ -4,8 +4,11 @@ import { randomUUID } from 'crypto';
 import { printDbConnectionHints, pgSslForUrl } from './db-errors.mjs';
 import { IMAGE_BY_CUISINE, DEFAULT_FOOD_IMAGES } from './food-image-urls.mjs';
 
-dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
-dotenv.config({ path: new URL('../.env.local', import.meta.url).pathname, override: true });
+// If DATABASE_URL is already set (e.g. seed-restaurants-env.mjs), never override via .env.local.
+if (!process.env.DATABASE_URL) {
+  dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
+  dotenv.config({ path: new URL('../.env.local', import.meta.url).pathname, override: true });
+}
 
 const dbUrl = process.env.DATABASE_URL;
 if (!dbUrl) {
