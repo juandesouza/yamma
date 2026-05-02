@@ -54,6 +54,18 @@ File: [`Dockerfile.api`](../Dockerfile.api) (repo root).
 
 The container exposes **8080**; Render injects **`PORT`** — Nest reads `PORT` from the environment (`backend` config).
 
+### Render: pushes not deploying / service looks stale
+
+Check these in the Render dashboard for your Web Service (e.g. `yamma-api` → **Settings** / **Events**):
+
+1. **Auto Deploy** — Under **Build & Deploy**, ensure **Auto-Deploy** is **On** for the branch you push to (usually `main`). If it is **Off** or limited to another branch, new commits will not build.
+2. **Connected repository** — Confirm the service is linked to **`juandesouza/yamma`** (not a fork or an old repo) and the **production branch** matches where you push.
+3. **Failed deploy** — Open **Logs** for the latest deploy. If the Docker build failed, Render will not roll out a new version until the failure is fixed; fix the error and use **Manual Deploy → Clear build cache & deploy** if needed.
+4. **Suspended service** — Free-tier services suspend when idle; waking or redeploying is separate from “new code” — still verify the **latest deploy commit SHA** on the service matches GitHub `main`.
+5. **Root directory** — For this repo, the Docker **context** should be the **repository root** so `Dockerfile.api` can `COPY backend ./backend`. If **Root Directory** is set to `backend` (or anything other than empty/root), the image build can fail or use the wrong paths.
+
+To see what Render actually shipped: in the service **Events** tab, open the latest **Deploy** and note the **commit**; it should match the commit you expect on GitHub.
+
 ---
 
 ## 3. Vercel (web)

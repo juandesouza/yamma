@@ -25,6 +25,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@yamma/design-system": [
+        "../design-system/src/index.ts"
       ]
     }
   },
