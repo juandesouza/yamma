@@ -10,6 +10,8 @@ export interface MenuItemCardProps {
   imageUrl?: string;
   currency?: string;
   onAdd?: () => void;
+  /** Brief success state — e.g. after “Add”; shows acknowledgement without a toast */
+  showAddedFeedback?: boolean;
   className?: string;
 }
 
@@ -20,6 +22,7 @@ export function MenuItemCard({
   imageUrl,
   currency = 'USD',
   onAdd,
+  showAddedFeedback = false,
   className = '',
 }: MenuItemCardProps) {
   const formattedPrice = new Intl.NumberFormat('pt-BR', {
@@ -42,15 +45,27 @@ export function MenuItemCard({
         )}
         <div className="flex items-center justify-between mt-2">
           <span className="font-semibold text-[var(--yamma-primary)]">{formattedPrice}</span>
-          {onAdd && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onAdd(); }}
-              className="rounded-lg bg-[var(--yamma-primary)] px-3 py-1.5 text-sm font-medium text-white transition-all hover:bg-[var(--yamma-primary-hover)] active:scale-95"
-            >
-              Add
-            </button>
-          )}
+          {onAdd &&
+            (showAddedFeedback ? (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[color-mix(in_srgb,var(--yamma-primary)_18%,transparent)] px-3 py-1.5 text-sm font-medium text-[var(--yamma-primary)] ring-2 ring-[var(--yamma-primary)] ring-offset-2 ring-offset-[var(--yamma-surface)] animate-in fade-in zoom-in duration-150"
+                aria-live="polite"
+              >
+                <span aria-hidden className="text-base leading-none">✓</span>
+                Added
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAdd();
+                }}
+                className="rounded-lg bg-[var(--yamma-primary)] px-3 py-1.5 text-sm font-medium text-white transition-all hover:bg-[var(--yamma-primary-hover)] active:scale-95"
+              >
+                Add
+              </button>
+            ))}
         </div>
       </div>
       {imageUrl && (

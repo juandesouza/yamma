@@ -36,6 +36,13 @@
       "when": 1775780915500,
       "tag": "0004_orders_user_id_column",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1775780916000,
+      "tag": "0005_orders_delivery_coordinates",
+      "breakpoints": true
     }
   ]
 }

@@ -21,7 +21,7 @@ This repo is a **pnpm monorepo**. Production split:
    ```
 
    (`backend/.env` or env must point at nHost when you run this.)  
-   Recent migrations add missing legacy columns (e.g. `menu_items.available`, `orders.user_id`); run migrate on production after pull or checkout will fail.
+   Recent migrations add missing legacy columns (e.g. `menu_items.available`, `orders.user_id`, `orders.delivery_latitude` / `delivery_longitude`); run migrate on production after pull or checkout will fail.
 
 ### Demo data (buyer homepage)
 
