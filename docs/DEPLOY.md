@@ -59,7 +59,7 @@ File: [`Dockerfile.api`](../Dockerfile.api) (repo root).
    - `API_URL=https://<your-render-service>.onrender.com`
    - `FRONTEND_URL=https://<your-vercel-domain>`
    - `GOOGLE_CALLBACK_URL=https://<your-vercel-domain>/api/auth/google/callback`
-   - `MAPBOX_ACCESS_TOKEN=...`
+   - `MAPBOX_ACCESS_TOKEN=...` **(required for checkout address search / reverse geocode)** — use the same secret token as in Mapbox Studio. Public Nominatim is only a dev fallback and **rate-limits shared cloud IPs with HTTP 429** (e.g. Render) if this is missing.
    - `LEMON_SQUEEZE_API_KEY=...`
    - `LEMON_SQUEEZE_WEBHOOK_SECRET=...`
    - `LEMON_SQUEEZE_STORE_ID=...`
