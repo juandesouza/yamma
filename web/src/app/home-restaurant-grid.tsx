@@ -184,7 +184,20 @@ export function HomeRestaurantGrid() {
 
   return (
     <>
-      {hint ? <p className="mb-4 text-sm text-[var(--yamma-text-muted)]">{hint}</p> : null}
+      {hint ? (
+        <div
+          className="mb-6 flex flex-col items-center justify-center gap-0 py-6"
+          role="status"
+          aria-busy="true"
+          aria-live="polite"
+        >
+          <div
+            className="h-10 w-10 shrink-0 animate-spin rounded-full border-[3px] border-[var(--yamma-primary)] border-t-transparent"
+            aria-hidden
+          />
+          <span className="sr-only">{hint}</span>
+        </div>
+      ) : null}
       {error ? <p className="mb-4 text-sm text-[#ef4444]">{error}</p> : null}
       <div className="grid grid-cols-1 gap-4">
         {restaurants.map((r) => (
