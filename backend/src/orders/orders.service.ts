@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createDb } from '../db';
 import { orders, orderItems, menuItems, restaurants } from '../db/schema';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { ConfigService } from '../config/config.service';
 import { EventsGateway } from '../events/events.gateway';
 
@@ -29,10 +29,49 @@ export interface CreateOrderInput {
 @Injectable()
 export class OrdersService {
   private db = createDb(process.env.DATABASE_URL!);
+  private orderColumnTypesPromise: Promise<Record<string, string>> | null = null;
   constructor(
     private readonly config: ConfigService,
     private readonly events: EventsGateway,
   ) {}
+
+  private async getOrderColumnTypes(): Promise<Record<string, string>> {
+    if (!this.orderColumnTypesPromise) {
+      this.orderColumnTypesPromise = this.db
+        .execute(
+          sql`
+            select column_name, data_type
+            from information_schema.columns
+            where table_schema = 'public' and table_name = 'orders'
+          `,
+        )
+        .then((res) => {
+          const out: Record<string, string> = {};
+          for (const row of res.rows as Array<{ column_name?: unknown; data_type?: unknown }>) {
+            const key = typeof row.column_name === 'string' ? row.column_name : '';
+            const type = typeof row.data_type === 'string' ? row.data_type : '';
+            if (key) out[key] = type;
+          }
+          return out;
+        })
+        .catch(() => ({}));
+    }
+    return this.orderColumnTypesPromise;
+  }
+
+  private asInsertValue(
+    columnName: string,
+    value: string | number | null | undefined,
+    colTypes: Record<string, string>,
+  ) {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    const t = (colTypes[columnName] ?? '').toLowerCase();
+    if (t === 'json' || t === 'jsonb') {
+      return JSON.stringify(value);
+    }
+    return value;
+  }
 
   async create(input: CreateOrderInput) {
     const subtotal = input.items.reduce(
@@ -41,22 +80,39 @@ export class OrdersService {
     );
     const deliveryFee = subtotal < 30 ? 5 : 0;
     const total = subtotal + deliveryFee;
+    const colTypes = await this.getOrderColumnTypes();
     const [order] = await this.db
       .insert(orders)
       .values({
         userId: input.userId,
         restaurantId: input.restaurantId,
         status: 'pending',
-        deliveryAddress: input.deliveryAddress,
+        deliveryAddress: this.asInsertValue('delivery_address', input.deliveryAddress, colTypes) as string,
         deliveryLatitude: input.deliveryLatitude?.toString(),
         deliveryLongitude: input.deliveryLongitude?.toString(),
         subtotal: subtotal.toFixed(2),
         deliveryFee: deliveryFee.toFixed(2),
         total: total.toFixed(2),
         currency: 'USD',
-        notes: input.notes,
+        notes: this.asInsertValue('notes', input.notes, colTypes) as string | undefined,
       })
-      .returning();
+      .returning({
+        id: orders.id,
+        userId: orders.userId,
+        restaurantId: orders.restaurantId,
+        status: orders.status,
+        deliveryAddress: orders.deliveryAddress,
+        deliveryLatitude: orders.deliveryLatitude,
+        deliveryLongitude: orders.deliveryLongitude,
+        subtotal: orders.subtotal,
+        deliveryFee: orders.deliveryFee,
+        total: orders.total,
+        currency: orders.currency,
+        notes: orders.notes,
+        courierRequestedAt: orders.courierRequestedAt,
+        createdAt: orders.createdAt,
+        updatedAt: orders.updatedAt,
+      });
     if (!order) throw new Error('Order insert failed');
     for (const item of input.items) {
       await this.db.insert(orderItems).values({
