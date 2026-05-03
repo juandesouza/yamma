@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import type { InferSelectModel, SQL } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { createDb } from '../db';
 import { orders, orderItems, menuItems, restaurants } from '../db/schema';
-import { and, desc, eq, sql } from 'drizzle-orm';
 import { ConfigService } from '../config/config.service';
 import { EventsGateway } from '../events/events.gateway';
 
@@ -26,6 +27,13 @@ export interface CreateOrderInput {
   notes?: string;
 }
 
+function isPgNotNullViolationOnCustomerId(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const code = 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const msg = 'message' in err ? String((err as { message?: unknown }).message) : '';
+  return code === '23502' && msg.includes('customer_id');
+}
+
 @Injectable()
 export class OrdersService {
   private db = createDb(process.env.DATABASE_URL!);
@@ -34,6 +42,10 @@ export class OrdersService {
     private readonly config: ConfigService,
     private readonly events: EventsGateway,
   ) {}
+
+  private invalidateOrderColumnCache() {
+    this.orderColumnTypesPromise = null;
+  }
 
   private async getOrderColumnTypes(): Promise<Record<string, string>> {
     if (!this.orderColumnTypesPromise) {
@@ -54,9 +66,25 @@ export class OrdersService {
           }
           return out;
         })
-        .catch(() => ({}));
+        .catch(() => {
+          this.orderColumnTypesPromise = null;
+          return {};
+        });
     }
     return this.orderColumnTypesPromise;
+  }
+
+  /** True if `orders.customer_id` exists (legacy Nhost / older schemas). */
+  private async ordersTableHasCustomerIdColumn(): Promise<boolean> {
+    const res = await this.db.execute(sql`
+      select 1 as x
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'orders'
+        and column_name = 'customer_id'
+      limit 1
+    `);
+    return ((res as { rows?: unknown[] }).rows?.length ?? 0) > 0;
   }
 
   private asInsertValue(
@@ -73,6 +101,132 @@ export class OrdersService {
     return value;
   }
 
+  private sqlForOrderColumn(
+    colTypes: Record<string, string>,
+    column: string,
+    value: string | number | undefined,
+  ): SQL {
+    if (value === undefined) return sql`NULL`;
+    const t = (colTypes[column] ?? '').toLowerCase();
+    if (t === 'json' || t === 'jsonb') {
+      return sql`${JSON.stringify(String(value))}::jsonb`;
+    }
+    return sql`${String(value)}`;
+  }
+
+  private sqlNumericOptional(v: number | undefined): SQL {
+    if (v === undefined || Number.isNaN(v)) return sql`NULL`;
+    return sql`${String(v)}::numeric`;
+  }
+
+  private mapRawOrderRow(raw: Record<string, unknown>): InferSelectModel<typeof orders> {
+    return {
+      id: String(raw.id),
+      userId: String(raw.user_id),
+      restaurantId: String(raw.restaurant_id),
+      status: String(raw.status) as InferSelectModel<typeof orders>['status'],
+      deliveryAddress:
+        typeof raw.delivery_address === 'string'
+          ? raw.delivery_address
+          : raw.delivery_address != null
+            ? JSON.stringify(raw.delivery_address)
+            : '',
+      deliveryLatitude:
+        raw.delivery_latitude != null ? String(raw.delivery_latitude) : null,
+      deliveryLongitude:
+        raw.delivery_longitude != null ? String(raw.delivery_longitude) : null,
+      subtotal: String(raw.subtotal),
+      deliveryFee: raw.delivery_fee != null ? String(raw.delivery_fee) : '0',
+      total: String(raw.total),
+      currency: raw.currency != null ? String(raw.currency) : 'USD',
+      notes:
+        raw.notes == null
+          ? null
+          : typeof raw.notes === 'string'
+            ? raw.notes
+            : JSON.stringify(raw.notes),
+      courierRequestedAt: raw.courier_requested_at
+        ? new Date(String(raw.courier_requested_at))
+        : null,
+      createdAt: new Date(String(raw.created_at)),
+      updatedAt: new Date(String(raw.updated_at)),
+    };
+  }
+
+  /**
+   * Legacy DBs have NOT NULL `customer_id` while the Drizzle schema only knows `user_id`.
+   */
+  private async insertOrderWithLegacyCustomerId(
+    input: CreateOrderInput,
+    colTypes: Record<string, string>,
+    subtotal: number,
+    deliveryFee: number,
+    total: number,
+  ): Promise<InferSelectModel<typeof orders>> {
+    const subtotalFixed = subtotal.toFixed(2);
+    const deliveryFeeFixed = deliveryFee.toFixed(2);
+    const totalFixed = total.toFixed(2);
+    const addrSql = this.sqlForOrderColumn(colTypes, 'delivery_address', input.deliveryAddress);
+    const notesFragment =
+      input.notes === undefined
+        ? { cols: sql``, vals: sql`` }
+        : {
+            cols: sql`, notes`,
+            vals: sql`, ${this.sqlForOrderColumn(colTypes, 'notes', input.notes)}`,
+          };
+
+    const result = await this.db.execute(sql`
+      insert into orders (
+        user_id,
+        customer_id,
+        restaurant_id,
+        status,
+        delivery_address,
+        delivery_latitude,
+        delivery_longitude,
+        subtotal,
+        delivery_fee,
+        total,
+        currency
+        ${notesFragment.cols}
+      ) values (
+        ${input.userId}::uuid,
+        ${input.userId}::uuid,
+        ${input.restaurantId}::uuid,
+        'pending',
+        ${addrSql},
+        ${this.sqlNumericOptional(input.deliveryLatitude)},
+        ${this.sqlNumericOptional(input.deliveryLongitude)},
+        ${subtotalFixed}::numeric,
+        ${deliveryFeeFixed}::numeric,
+        ${totalFixed}::numeric,
+        'USD'
+        ${notesFragment.vals}
+      )
+      returning
+        id,
+        user_id,
+        restaurant_id,
+        status,
+        delivery_address,
+        delivery_latitude,
+        delivery_longitude,
+        subtotal,
+        delivery_fee,
+        total,
+        currency,
+        notes,
+        courier_requested_at,
+        created_at,
+        updated_at
+    `);
+
+    const rows = (result as { rows?: Record<string, unknown>[] }).rows;
+    const row = rows?.[0];
+    if (!row) throw new Error('Order insert failed');
+    return this.mapRawOrderRow(row);
+  }
+
   async create(input: CreateOrderInput) {
     const subtotal = input.items.reduce(
       (sum, i) => sum + Number(i.unitPrice) * i.quantity,
@@ -80,39 +234,58 @@ export class OrdersService {
     );
     const deliveryFee = subtotal < 30 ? 5 : 0;
     const total = subtotal + deliveryFee;
-    const colTypes = await this.getOrderColumnTypes();
-    const [order] = await this.db
-      .insert(orders)
-      .values({
-        userId: input.userId,
-        restaurantId: input.restaurantId,
-        status: 'pending',
-        deliveryAddress: this.asInsertValue('delivery_address', input.deliveryAddress, colTypes) as string,
-        deliveryLatitude: input.deliveryLatitude?.toString(),
-        deliveryLongitude: input.deliveryLongitude?.toString(),
-        subtotal: subtotal.toFixed(2),
-        deliveryFee: deliveryFee.toFixed(2),
-        total: total.toFixed(2),
-        currency: 'USD',
-        notes: this.asInsertValue('notes', input.notes, colTypes) as string | undefined,
-      })
-      .returning({
-        id: orders.id,
-        userId: orders.userId,
-        restaurantId: orders.restaurantId,
-        status: orders.status,
-        deliveryAddress: orders.deliveryAddress,
-        deliveryLatitude: orders.deliveryLatitude,
-        deliveryLongitude: orders.deliveryLongitude,
-        subtotal: orders.subtotal,
-        deliveryFee: orders.deliveryFee,
-        total: orders.total,
-        currency: orders.currency,
-        notes: orders.notes,
-        courierRequestedAt: orders.courierRequestedAt,
-        createdAt: orders.createdAt,
-        updatedAt: orders.updatedAt,
-      });
+    let colTypes = await this.getOrderColumnTypes();
+    const hasCustomerIdCol =
+      Object.prototype.hasOwnProperty.call(colTypes, 'customer_id') ||
+      (await this.ordersTableHasCustomerIdColumn().catch(() => false));
+
+    let order: InferSelectModel<typeof orders> | undefined;
+
+    if (hasCustomerIdCol) {
+      order = await this.insertOrderWithLegacyCustomerId(input, colTypes, subtotal, deliveryFee, total);
+    } else {
+      try {
+        order = (
+          await this.db
+            .insert(orders)
+            .values({
+              userId: input.userId,
+              restaurantId: input.restaurantId,
+              status: 'pending',
+              deliveryAddress: this.asInsertValue('delivery_address', input.deliveryAddress, colTypes) as string,
+              deliveryLatitude: input.deliveryLatitude?.toString(),
+              deliveryLongitude: input.deliveryLongitude?.toString(),
+              subtotal: subtotal.toFixed(2),
+              deliveryFee: deliveryFee.toFixed(2),
+              total: total.toFixed(2),
+              currency: 'USD',
+              notes: this.asInsertValue('notes', input.notes, colTypes) as string | undefined,
+            })
+            .returning({
+              id: orders.id,
+              userId: orders.userId,
+              restaurantId: orders.restaurantId,
+              status: orders.status,
+              deliveryAddress: orders.deliveryAddress,
+              deliveryLatitude: orders.deliveryLatitude,
+              deliveryLongitude: orders.deliveryLongitude,
+              subtotal: orders.subtotal,
+              deliveryFee: orders.deliveryFee,
+              total: orders.total,
+              currency: orders.currency,
+              notes: orders.notes,
+              courierRequestedAt: orders.courierRequestedAt,
+              createdAt: orders.createdAt,
+              updatedAt: orders.updatedAt,
+            })
+        )[0];
+      } catch (e) {
+        if (!isPgNotNullViolationOnCustomerId(e)) throw e;
+        this.invalidateOrderColumnCache();
+        colTypes = await this.getOrderColumnTypes();
+        order = await this.insertOrderWithLegacyCustomerId(input, colTypes, subtotal, deliveryFee, total);
+      }
+    }
     if (!order) throw new Error('Order insert failed');
     for (const item of input.items) {
       await this.db.insert(orderItems).values({
