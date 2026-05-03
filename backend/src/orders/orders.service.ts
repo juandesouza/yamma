@@ -34,6 +34,13 @@ function isPgNotNullViolationOnCustomerId(err: unknown): boolean {
   return code === '23502' && msg.includes('customer_id');
 }
 
+function isPgNotNullViolationOnOrderItemTotalPrice(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const code = 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const msg = 'message' in err ? String((err as { message?: unknown }).message) : '';
+  return code === '23502' && msg.includes('total_price');
+}
+
 @Injectable()
 export class OrdersService {
   private db = createDb(process.env.DATABASE_URL!);
@@ -72,6 +79,24 @@ export class OrdersService {
         });
     }
     return this.orderColumnTypesPromise;
+  }
+
+  /** Columns present on `order_items` (legacy Nhost schemas differ). */
+  private async getOrderItemColumnNames(): Promise<Set<string>> {
+    try {
+      const res = await this.db.execute(sql`
+        select column_name
+        from information_schema.columns
+        where table_schema = 'public' and table_name = 'order_items'
+      `);
+      const s = new Set<string>();
+      for (const row of res.rows as Array<{ column_name?: unknown }>) {
+        if (typeof row.column_name === 'string') s.add(row.column_name);
+      }
+      return s;
+    } catch {
+      return new Set<string>();
+    }
   }
 
   /** True if `orders.customer_id` exists (legacy Nhost / older schemas). */
@@ -287,14 +312,59 @@ export class OrdersService {
       }
     }
     if (!order) throw new Error('Order insert failed');
+
+    const orderItemCols = await this.getOrderItemColumnNames();
+
     for (const item of input.items) {
-      await this.db.insert(orderItems).values({
-        orderId: order.id,
-        menuItemId: item.menuItemId,
-        name: item.name,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-      });
+      const lineTotal = (Number(item.unitPrice) * item.quantity).toFixed(2);
+      if (orderItemCols.has('total_price')) {
+        await this.db.execute(sql`
+          insert into "order_items" (
+            "order_id",
+            "menu_item_id",
+            "name",
+            "quantity",
+            "unit_price",
+            "total_price"
+          ) values (
+            ${order.id}::uuid,
+            ${item.menuItemId}::uuid,
+            ${item.name},
+            ${item.quantity},
+            ${item.unitPrice}::numeric,
+            ${lineTotal}::numeric
+          )
+        `);
+      } else {
+        try {
+          await this.db.insert(orderItems).values({
+            orderId: order.id,
+            menuItemId: item.menuItemId,
+            name: item.name,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          });
+        } catch (e) {
+          if (!isPgNotNullViolationOnOrderItemTotalPrice(e)) throw e;
+          await this.db.execute(sql`
+            insert into "order_items" (
+              "order_id",
+              "menu_item_id",
+              "name",
+              "quantity",
+              "unit_price",
+              "total_price"
+            ) values (
+              ${order.id}::uuid,
+              ${item.menuItemId}::uuid,
+              ${item.name},
+              ${item.quantity},
+              ${item.unitPrice}::numeric,
+              ${lineTotal}::numeric
+            )
+          `);
+        }
+      }
     }
     return order;
   }
