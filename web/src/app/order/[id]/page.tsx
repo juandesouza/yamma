@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { clearCartIfAwaitingOrderPaid } from '@/lib/cart-storage';
@@ -29,7 +29,9 @@ const STEPS: { key: string; label: string }[] = [
 
 export default function OrderTrackingPage() {
   const params = useParams();
+  const search = useSearchParams();
   const id = params.id as string;
+  const fromLemon = search.get('from') === 'lemon';
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [handoffNotice, setHandoffNotice] = useState(false);
@@ -40,7 +42,23 @@ export default function OrderTrackingPage() {
     async function fetchOrder() {
       const res = await fetch(`/api/orders/${id}`, { credentials: 'include', cache: 'no-store' });
       if (res.ok) {
-        const data = (await res.json()) as OrderRow;
+        let data = (await res.json()) as OrderRow;
+        // Lemon redirects here immediately after checkout; ask backend to sync once if still pending.
+        if (fromLemon && data.status === 'pending') {
+          const cr = await fetch('/api/payments/lemon/sync-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ orderId: id }),
+          });
+          if (cr.ok) {
+            const refreshed = await fetch(`/api/orders/${id}`, {
+              credentials: 'include',
+              cache: 'no-store',
+            });
+            if (refreshed.ok) data = (await refreshed.json()) as OrderRow;
+          }
+        }
         setOrder(data);
         if (data.courierRequestedAt) setHandoffNotice(true);
       }
@@ -75,7 +93,7 @@ export default function OrderTrackingPage() {
     return () => {
       socket?.disconnect();
     };
-  }, [id]);
+  }, [id, fromLemon]);
 
   useEffect(() => {
     if (!order || order.status === 'pending') return;

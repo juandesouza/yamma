@@ -166,7 +166,7 @@ export class LemonSqueezeProvider implements IPaymentProvider {
             if (!tok) throw new Error('Lemon Squeezy: returnToken is required for mobile checkout');
             return `${base}/payment/return/${encodeURIComponent(tok)}`;
           })()
-        : `${base}/checkout/return?orderId=${encodeURIComponent(input.orderId)}`;
+        : `${base}/order/${encodeURIComponent(input.orderId)}?from=lemon`;
 
     await this.assertVariantMatchesStore(variantId, storeId);
 
