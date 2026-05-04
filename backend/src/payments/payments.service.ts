@@ -142,6 +142,24 @@ export class PaymentsService {
   ): string {
     const fe = this.config.frontendUrl.replace(/\/$/, '');
     if (checkoutSuccessTarget !== 'mobile') {
+      if (this.config.env === 'production') {
+        try {
+          const u = new URL(fe);
+          if (
+            u.protocol !== 'https:' ||
+            ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)
+          ) {
+            throw new BadRequestException(
+              'Card checkout return URL is invalid for production. Set FRONTEND_URL to your public web app origin (e.g. https://yamma-web.vercel.app), not localhost.',
+            );
+          }
+        } catch (e) {
+          if (e instanceof BadRequestException) throw e;
+          throw new BadRequestException(
+            'Card checkout return URL is invalid for production. Set FRONTEND_URL to your public web app origin (e.g. https://yamma-web.vercel.app).',
+          );
+        }
+      }
       return fe;
     }
 
