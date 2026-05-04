@@ -1,5 +1,4 @@
 import {
-  BadGatewayException,
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -241,10 +240,12 @@ export class PaymentsService {
     } catch (e) {
       let msg = e instanceof Error ? e.message : 'Payment provider error';
       if (msg.length > 600) msg = `${msg.slice(0, 597)}…`;
+      this.logger.warn(`Lemon createPayment failed orderId=${orderId}: ${msg}`);
       if (/not configured/i.test(msg)) {
         throw new ServiceUnavailableException(msg);
       }
-      throw new BadGatewayException(msg);
+      /** 400 — Lemon misconfig / API rejection; avoid 502 which looks like an infra outage. */
+      throw new BadRequestException(msg);
     }
 
     const metadataPayload =
