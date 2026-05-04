@@ -26,6 +26,7 @@ export type CreatePaymentOptions = {
 export class PaymentsService {
   private db = createDb(process.env.DATABASE_URL!);
   private readonly logger = new Logger(PaymentsService.name);
+  private paymentColumnNamesPromise: Promise<Set<string>> | null = null;
 
   constructor(
     private lemon: LemonSqueezeProvider,
@@ -35,6 +36,26 @@ export class PaymentsService {
 
   getProvider() {
     return this.lemon;
+  }
+
+  private async getPaymentColumnNames(): Promise<Set<string>> {
+    if (!this.paymentColumnNamesPromise) {
+      this.paymentColumnNamesPromise = this.db
+        .execute(sql`
+          select column_name
+          from information_schema.columns
+          where table_schema = 'public' and table_name = 'payments'
+        `)
+        .then((res) => {
+          const out = new Set<string>();
+          for (const row of res.rows as Array<{ column_name?: unknown }>) {
+            if (typeof row.column_name === 'string') out.add(row.column_name);
+          }
+          return out;
+        })
+        .catch(() => new Set<string>());
+    }
+    return this.paymentColumnNamesPromise;
   }
 
   /** Resolves stored Expo / dev-client deep link for Lemon return URL `/payment/return/:token`. */
@@ -256,7 +277,41 @@ export class PaymentsService {
           })
         : undefined;
 
-    try {
+    const paymentCols = await this.getPaymentColumnNames();
+    const hasMethodColumn = paymentCols.has('method');
+    const hasReturnTokenColumn = paymentCols.has('return_token');
+
+    if (hasMethodColumn || !hasReturnTokenColumn) {
+      const methodCols = hasMethodColumn ? sql`, "method"` : sql``;
+      const methodVals = hasMethodColumn ? sql`, ${'card'}` : sql``;
+      const returnTokenCols = hasReturnTokenColumn && returnToken ? sql`, "return_token"` : sql``;
+      const returnTokenVals = hasReturnTokenColumn && returnToken ? sql`, ${returnToken}` : sql``;
+      const metadataCols = metadataPayload ? sql`, "metadata"` : sql``;
+      const metadataVals = metadataPayload ? sql`, ${metadataPayload}` : sql``;
+      await this.db.execute(sql`
+        insert into "payments" (
+          "order_id",
+          "provider",
+          "provider_payment_id",
+          "status",
+          "amount",
+          "currency"
+          ${methodCols}
+          ${returnTokenCols}
+          ${metadataCols}
+        ) values (
+          ${orderId}::uuid,
+          ${'lemon_squeeze'},
+          ${result.providerPaymentId},
+          ${result.status},
+          ${amount.toFixed(2)}::numeric,
+          ${currency}
+          ${methodVals}
+          ${returnTokenVals}
+          ${metadataVals}
+        )
+      `);
+    } else {
       await this.db.insert(payments).values({
         orderId,
         provider: 'lemon_squeeze',
@@ -267,28 +322,6 @@ export class PaymentsService {
         ...(returnToken ? { returnToken } : {}),
         ...(metadataPayload ? { metadata: metadataPayload } : {}),
       });
-    } catch (err: unknown) {
-      const e = err as { code?: string; message?: string };
-      const missingReturnTokenColumn =
-        e?.code === '42703' ||
-        (typeof e?.message === 'string' &&
-          (/return_token/i.test(e.message) || /column .* does not exist/i.test(e.message)));
-      if (missingReturnTokenColumn && metadataPayload) {
-        this.logger.warn(
-          'payments.return_token missing — inserted without column. Run: pnpm run db:migrate:env (backend)',
-        );
-        await this.db.insert(payments).values({
-          orderId,
-          provider: 'lemon_squeeze',
-          providerPaymentId: result.providerPaymentId,
-          status: result.status,
-          amount: amount.toFixed(2),
-          currency,
-          metadata: metadataPayload,
-        });
-      } else {
-        throw err;
-      }
     }
     return result;
   }
