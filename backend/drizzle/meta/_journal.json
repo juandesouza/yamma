@@ -78,6 +78,13 @@
       "when": 1777832420000,
       "tag": "0010_order_items_total_price",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777855200000,
+      "tag": "0011_payments_currency_column",
+      "breakpoints": true
     }
   ]
 }
