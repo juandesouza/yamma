@@ -27,6 +27,7 @@ export class PaymentsService {
   private db = createDb(process.env.DATABASE_URL!);
   private readonly logger = new Logger(PaymentsService.name);
   private paymentColumnNamesPromise: Promise<Set<string>> | null = null;
+  private paymentMethodLabelsPromise: Promise<Set<string>> | null = null;
 
   constructor(
     private lemon: LemonSqueezeProvider,
@@ -56,6 +57,37 @@ export class PaymentsService {
         .catch(() => new Set<string>());
     }
     return this.paymentColumnNamesPromise;
+  }
+
+  private async getPaymentMethodLabels(): Promise<Set<string>> {
+    if (!this.paymentMethodLabelsPromise) {
+      this.paymentMethodLabelsPromise = this.db
+        .execute(sql`
+          select e.enumlabel
+          from pg_enum e
+          join pg_type t on t.oid = e.enumtypid
+          where t.typname = 'payment_method'
+        `)
+        .then((res) => {
+          const out = new Set<string>();
+          for (const row of res.rows as Array<{ enumlabel?: unknown }>) {
+            if (typeof row.enumlabel === 'string') out.add(row.enumlabel);
+          }
+          return out;
+        })
+        .catch(() => new Set<string>());
+    }
+    return this.paymentMethodLabelsPromise;
+  }
+
+  private pickLegacyPaymentMethod(labels: Set<string>): string | null {
+    if (!labels.size) return null;
+    // Prefer explicit "card" semantics first; otherwise use a provider-ish label.
+    const preferred = ['card', 'credit_card', 'lemon_squeeze', 'online', 'checkout'];
+    for (const p of preferred) {
+      if (labels.has(p)) return p;
+    }
+    return Array.from(labels)[0] ?? null;
   }
 
   /** Resolves stored Expo / dev-client deep link for Lemon return URL `/payment/return/:token`. */
@@ -282,8 +314,18 @@ export class PaymentsService {
     const hasReturnTokenColumn = paymentCols.has('return_token');
 
     if (hasMethodColumn || !hasReturnTokenColumn) {
+      let methodValue: string | null = null;
+      if (hasMethodColumn) {
+        const labels = await this.getPaymentMethodLabels();
+        methodValue = this.pickLegacyPaymentMethod(labels);
+        if (!methodValue) {
+          throw new BadRequestException(
+            'Legacy payments.method enum has no values available; run DB migration/alignment.',
+          );
+        }
+      }
       const methodCols = hasMethodColumn ? sql`, "method"` : sql``;
-      const methodVals = hasMethodColumn ? sql`, ${'card'}` : sql``;
+      const methodVals = hasMethodColumn ? sql`, ${methodValue}` : sql``;
       const returnTokenCols = hasReturnTokenColumn && returnToken ? sql`, "return_token"` : sql``;
       const returnTokenVals = hasReturnTokenColumn && returnToken ? sql`, ${returnToken}` : sql``;
       const metadataCols = metadataPayload ? sql`, "metadata"` : sql``;
