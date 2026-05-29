@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { BACKEND_API_URL } from '@/lib/backend-api-url';
 import { parseGoogleOAuthState } from '@/lib/google-oauth-state';
 import { oauthPublicOrigin } from '@/lib/oauth-public-origin';
 
 /** Prefer INTERNAL_API_URL for server-side fetch if localhost misbehaves. */
-const API =
-  process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:3001';
+const API = process.env.INTERNAL_API_URL?.trim() || BACKEND_API_URL;
 
 const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 7;
 
@@ -77,7 +77,14 @@ export async function GET(request: NextRequest) {
     console.error('[google/callback] exchange failed', exchange.status, msg || rawText.slice(0, 500));
     const m = msg.toLowerCase();
     let code = 'google-sign-in-failed';
-    if (m.includes('redirect_uri_mismatch')) {
+    if (
+      exchange.status === 503 ||
+      m.includes('database is unreachable') ||
+      m.includes('enotfound') ||
+      m.includes('getaddrinfo')
+    ) {
+      code = 'google-db-unavailable';
+    } else if (m.includes('redirect_uri_mismatch')) {
       code = 'google-bad-redirect';
     } else if (m.includes('invalid_grant') || m.includes('bad_verification_code')) {
       code = 'google-token-used';

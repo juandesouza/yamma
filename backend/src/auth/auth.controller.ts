@@ -25,6 +25,7 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import type { SessionUser } from './auth.types';
 import { z } from 'zod';
 import { isGuestUserEmail } from './guest.constants';
+import { DATABASE_UNAVAILABLE_MESSAGE, isDatabaseConnectionError } from '../common/db-errors';
 import { sign, verify } from 'jsonwebtoken';
 import * as nodemailer from 'nodemailer';
 
@@ -67,6 +68,13 @@ const resetPasswordSchema = z.object({
 });
 
 /** Rethrow when duplicate @nestjs/common breaks `instanceof BadRequestException`. */
+function rethrowIfDatabaseError(e: unknown): never {
+  if (isDatabaseConnectionError(e)) {
+    throw new ServiceUnavailableException(DATABASE_UNAVAILABLE_MESSAGE);
+  }
+  throw e;
+}
+
 function isNestHttpExceptionShape(e: unknown): boolean {
   return (
     typeof e === 'object' &&
@@ -567,17 +575,24 @@ export class AuthController {
   async guestSession(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
     const data = guestSessionSchema.parse(body);
     const role = data.role ?? 'buyer';
-    const user = await this.users.ensureGuestUser(role);
-    if (role === 'seller') {
-      await this.restaurants.seedGuestSellerDemoIfNeeded(user.id);
+    try {
+      const user = await this.users.ensureGuestUser(role);
+      if (role === 'seller') {
+        await this.restaurants.seedGuestSellerDemoIfNeeded(user.id);
+      }
+      const { sessionId, expiresAt } = await this.auth.createSession(user.id);
+      this.setSessionCookie(res, sessionId);
+      return {
+        sessionId,
+        user: { id: user.id, email: user.email, name: user.name, role: user.role },
+        expiresAt,
+      };
+    } catch (e: unknown) {
+      if (e instanceof HttpException || isNestHttpExceptionShape(e)) {
+        throw e;
+      }
+      rethrowIfDatabaseError(e);
     }
-    const { sessionId, expiresAt } = await this.auth.createSession(user.id);
-    this.setSessionCookie(res, sessionId);
-    return {
-      sessionId,
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
-      expiresAt,
-    };
   }
 
   /**
@@ -615,6 +630,10 @@ export class AuthController {
     } catch (e: unknown) {
       if (e instanceof HttpException || isNestHttpExceptionShape(e)) {
         throw e;
+      }
+      if (isDatabaseConnectionError(e)) {
+        console.error('[auth/google/exchange] database unreachable', e);
+        throw new ServiceUnavailableException(DATABASE_UNAVAILABLE_MESSAGE);
       }
       const msg = formatUnknownError(e);
       console.error('[auth/google/exchange] unexpected', msg, e);

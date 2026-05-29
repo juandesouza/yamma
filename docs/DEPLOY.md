@@ -14,6 +14,10 @@ This repo is a **pnpm monorepo**. Production split:
 
 1. In the nHost dashboard, open your project → **Database** → connection string.
 2. Use it as **`DATABASE_URL`** for the API (Render environment variables). Prefer `sslmode=require` if offered.
+
+**If the database was paused:** wake it in nHost, then **copy the connection string again**. The hostname may change; an old URL like `….nhost.run` can stop resolving (`ENOTFOUND`) and break guest login and Google sign-in on the API. After updating `DATABASE_URL` on Render, **restart yamma-api** and run `pnpm run db:migrate:env` if needed.
+
+Check API health: `curl https://<your-render-service>.onrender.com/health` → `{"ok":true,"service":"yamma-api"}`.
 3. Run migrations against that URL from CI or your machine:
 
    ```bash

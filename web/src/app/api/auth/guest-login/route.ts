@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-
+import { BACKEND_API_URL as API } from '@/lib/backend-api-url';
 function forwardAuthCookie(response: Response, redirectTo: string, request: NextRequest) {
   const nextResponse = NextResponse.redirect(new URL(redirectTo, request.url));
   const getSetCookie = (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
@@ -32,6 +31,10 @@ export async function GET(request: NextRequest) {
 
     if (res.ok) {
       return forwardAuthCookie(res, redirectTo, request);
+    }
+
+    if (res.status === 503) {
+      return NextResponse.redirect(new URL('/login?error=guest-db-unavailable', request.url));
     }
 
     return NextResponse.redirect(new URL('/login?error=guest-login-failed', request.url));

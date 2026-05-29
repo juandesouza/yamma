@@ -21,7 +21,7 @@ export function LoginPageClient() {
   const googleErrorMessages: Record<string, string> = {
     'google-state-mismatch': 'Google sign-in session expired. Close this tab and try “Continue with Google” again.',
     'google-bad-redirect':
-      'OAuth redirect did not match this app URL. Add this exact redirect URI in Google Cloud: your site origin + /api/auth/google/callback (e.g. http://localhost:3000/api/auth/google/callback).',
+      'OAuth redirect did not match this app URL. Add this exact redirect URI in Google Cloud: your site origin + /api/auth/google/callback (local dev defaults to http://localhost:3005/api/auth/google/callback).',
     'google-token':
       'Google could not complete sign-in (token). Check that the redirect URI in Google Cloud matches the URL you use to open the app, including http vs https and host (localhost vs IP).',
     'google-token-used':
@@ -42,11 +42,15 @@ export function LoginPageClient() {
     'google-api-unreachable':
       'Could not reach the API from the web server. Check INTERNAL_API_URL / NEXT_PUBLIC_API_URL and that the backend is running.',
     'google-sign-in-failed': 'Google sign-in failed. Please try again, or use email and password.',
+    'google-db-unavailable':
+      'The Yamma API cannot reach the database. In Render (yamma-api), set DATABASE_URL to the current connection string from nHost (after wake/unpause the database may need a new hostname). Then restart yamma-api and try again.',
   };
   const urlErrorMessage = urlError?.startsWith('google-')
     ? googleErrorMessages[urlError] ?? googleErrorMessages['google-sign-in-failed']
-    : urlError === 'guest-login-failed' || urlError === 'guest-unavailable'
-      ? 'Guest sign-in failed. Please try again or use email.'
+    : urlError === 'guest-db-unavailable'
+      ? 'The Yamma API cannot reach the database. Update DATABASE_URL on Render (yamma-api) from the nHost dashboard, restart the API, then try again.'
+      : urlError === 'guest-login-failed' || urlError === 'guest-unavailable'
+        ? 'Guest sign-in failed. Please try again or use email.'
       : urlError === 'demo-login-failed' || urlError === 'demo-login-unavailable'
         ? 'Demo sign-in failed. Please try again or register.'
         : urlError

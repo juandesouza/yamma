@@ -9,10 +9,12 @@ import { PaymentsModule } from './payments/payments.module';
 import { MapboxModule } from './mapbox/mapbox.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { EventsModule } from './events/events.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
     ConfigModule,
+    HealthModule,
     AuthModule,
     UsersModule,
     RestaurantsModule,
