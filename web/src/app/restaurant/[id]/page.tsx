@@ -2,8 +2,7 @@ import { notFound } from 'next/navigation';
 import { RestaurantMenuWithCart } from './restaurant-menu-with-cart';
 import { RestaurantHeroImage } from './restaurant-hero-image';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-
+import { BACKEND_API_URL as API } from '@/lib/backend-api-url';
 async function getRestaurant(id: string) {
   try {
     const res = await fetch(`${API}/restaurants/${id}`, { cache: 'no-store' });

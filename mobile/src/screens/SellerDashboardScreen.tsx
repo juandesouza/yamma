@@ -173,8 +173,13 @@ export default function SellerDashboardScreen() {
         ListEmptyComponent={<Text style={styles.muted}>No orders yet.</Text>}
         renderItem={({ item }) => {
           const isPendingPayment = item.status === 'pending';
-          const canDispatch = item.status === 'confirmed' && !item.courierRequestedAt;
-          const waitingDriver = item.status === 'confirmed' && Boolean(item.courierRequestedAt);
+          const blocked = item.status === 'pending' || item.status === 'cancelled';
+          const canDispatch = __DEV__
+            ? !blocked
+            : item.status === 'confirmed' && !item.courierRequestedAt;
+          const waitingDriver =
+            !__DEV__ && item.status === 'confirmed' && Boolean(item.courierRequestedAt);
+          const waitingDriverDev = __DEV__ && Boolean(item.courierRequestedAt) && !blocked;
           return (
             <View style={styles.orderCard}>
               <View style={styles.orderHeader}>
@@ -197,16 +202,25 @@ export default function SellerDashboardScreen() {
                   Waiting for a driver to accept (delivery partner notified).
                 </Text>
               ) : null}
+              {waitingDriverDev ? (
+                <Text style={styles.orderHint}>
+                  Dev: tap again anytime to send another Nexo handoff.
+                </Text>
+              ) : null}
               <TouchableOpacity
-                style={[styles.dispatchBtn, (!canDispatch || dispatchingId !== null) && styles.dispatchBtnDisabled]}
+                style={[styles.dispatchBtn, !canDispatch && styles.dispatchBtnDisabled]}
                 onPress={() => void dispatchOrder(item.id)}
-                disabled={!canDispatch || dispatchingId !== null}
+                disabled={!canDispatch || dispatchingId === item.id}
                 activeOpacity={0.85}
               >
                 {dispatchingId === item.id ? (
                   <ActivityIndicator color="#0f1014" />
                 ) : (
-                  <Text style={styles.dispatchBtnText}>Ready and send to delivery</Text>
+                  <Text style={styles.dispatchBtnText}>
+                    {__DEV__ && (item.courierRequestedAt || item.status !== 'confirmed')
+                      ? 'Ready and send to delivery (again)'
+                      : 'Ready and send to delivery'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>

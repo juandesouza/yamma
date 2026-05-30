@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Button } from '@yamma/design-system';
 import { clearCartIfAwaitingOrderPaid } from '@/lib/cart-storage';
+import { resolvePendingAfterLemonReturn } from '@/lib/resolve-pending-lemon-dev';
 
 const POLL_MS = 2000;
 const MAX_POLLS = 90;
@@ -45,17 +46,12 @@ export function CheckoutReturnPageClient() {
         }
         if (s === 'pending' && pollCount >= 3 && !devConfirmAttempted) {
           devConfirmAttempted = true;
-          const cr = await fetch('/api/payments/lemon/sync-order', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ orderId: oid }),
-          });
-          if (cr.ok) {
+          const resolved = await resolvePendingAfterLemonReturn(oid);
+          if (resolved) {
             clearCartIfAwaitingOrderPaid(oid);
             setStatus('ready');
             if (timer) clearInterval(timer);
-            window.location.replace(`/order/${oid}`);
+            window.location.replace(`/order/${oid}?from=lemon`);
             return;
           }
         }

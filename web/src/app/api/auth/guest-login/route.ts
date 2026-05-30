@@ -37,6 +37,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/login?error=guest-db-unavailable', request.url));
     }
 
+    const bodyText = await res.text().catch(() => '');
+    console.error('[guest-login] backend failed', res.status, bodyText.slice(0, 500));
     return NextResponse.redirect(new URL('/login?error=guest-login-failed', request.url));
   } catch {
     return NextResponse.redirect(new URL('/login?error=guest-unavailable', request.url));

@@ -9,11 +9,13 @@ import {
   RawBodyRequest,
   UnauthorizedException,
   UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { SessionGuard } from '../auth/guards/session.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../auth/auth.types';
+import { ConfigService } from '../config/config.service';
 import { z } from 'zod';
 
 const createSchema = z
@@ -44,11 +46,22 @@ const devConfirmReturnSchema = z.object({
   orderId: z.string().uuid(),
 });
 
+const devForceLatestSchema = z.object({
+  /** `customer` — your latest pending order as buyer. `seller` — latest pending at a restaurant you own. */
+  scope: z.enum(['customer', 'seller']).optional(),
+});
+
+/** Must match proxy + clients; HTTP headers are case-insensitive. */
+const DEV_FORCE_CONFIRM_HEADER = 'x-yamma-dev-force-confirm-token';
+
 @Controller('payments')
 export class PaymentsController {
   private readonly logger = new Logger(PaymentsController.name);
 
-  constructor(private payments: PaymentsService) {}
+  constructor(
+    private payments: PaymentsService,
+    private config: ConfigService,
+  ) {}
 
   @Post('create')
   @UseGuards(SessionGuard)
@@ -118,5 +131,43 @@ export class PaymentsController {
     const parsed = devConfirmReturnSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     return this.payments.syncLemonOrderAfterCheckout(parsed.data.orderId, user.id);
+  }
+
+  /**
+   * Development only: pretend checkout succeeded (no Lemon API). Optional
+   * `DEV_FORCE_CONFIRM_PAYMENT_TOKEN` + matching `X-Yamma-Dev-Force-Confirm-Token` header.
+   */
+  @Post('dev/force-confirm-checkout')
+  @UseGuards(SessionGuard)
+  async devForceConfirmCheckout(
+    @CurrentUser() user: SessionUser,
+    @Body() body: unknown,
+    @Headers(DEV_FORCE_CONFIRM_HEADER) headerToken?: string,
+  ) {
+    if (this.config.env !== 'development') {
+      throw new ForbiddenException('Not available outside development');
+    }
+    const parsed = devConfirmReturnSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.payments.devForceConfirmCheckout(parsed.data.orderId, user.id, headerToken);
+  }
+
+  /**
+   * Development only: confirm latest pending order (see body `scope`).
+   * Same optional token as `/dev/force-confirm-checkout`.
+   */
+  @Post('dev/force-confirm-latest-pending')
+  @UseGuards(SessionGuard)
+  async devForceConfirmLatestPending(
+    @CurrentUser() user: SessionUser,
+    @Body() body: unknown,
+    @Headers(DEV_FORCE_CONFIRM_HEADER) headerToken?: string,
+  ) {
+    if (this.config.env !== 'development') {
+      throw new ForbiddenException('Not available outside development');
+    }
+    const parsed = devForceLatestSchema.safeParse(body ?? {});
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.payments.devForceConfirmLatestPending(user.id, headerToken, parsed.data.scope ?? 'customer');
   }
 }

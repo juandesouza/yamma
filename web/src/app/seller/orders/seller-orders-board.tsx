@@ -92,9 +92,15 @@ export function SellerOrdersBoard() {
       ) : (
         <div className="space-y-4">
           {orders.map((o) => {
-            const canDispatch = o.status === 'confirmed' && !o.courierRequestedAt;
+            const isDev = process.env.NODE_ENV === 'development';
+            const blocked = o.status === 'pending' || o.status === 'cancelled';
+            // Production: one dispatch on confirmed only. Dev: always clickable (re-test Nexo / drivers).
+            const canDispatch = isDev
+              ? !blocked
+              : o.status === 'confirmed' && !o.courierRequestedAt;
             const waitingDriver =
-              o.status === 'confirmed' && Boolean(o.courierRequestedAt);
+              o.status === 'confirmed' && Boolean(o.courierRequestedAt) && !isDev;
+            const waitingDriverDev = isDev && Boolean(o.courierRequestedAt) && !blocked;
             return (
               <article key={o.id} className="rounded-2xl border border-[var(--yamma-border)] bg-[var(--yamma-surface)] p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -111,6 +117,11 @@ export function SellerOrdersBoard() {
                         Waiting for a driver to accept (delivery partner notified).
                       </p>
                     ) : null}
+                    {waitingDriverDev ? (
+                      <p className="mt-2 text-xs text-amber-200/90">
+                        Dev: tap again anytime to send another Nexo handoff (status {o.status.replace('_', ' ')}).
+                      </p>
+                    ) : null}
                   </div>
                   <span className="rounded-full border border-[var(--yamma-border-muted)] bg-[var(--yamma-popover)] px-2.5 py-1 text-xs font-medium capitalize text-[var(--yamma-text-secondary)]">
                     {o.status.replace('_', ' ')}
@@ -121,9 +132,11 @@ export function SellerOrdersBoard() {
                     variant="secondary"
                     onClick={() => void dispatch(o.id)}
                     loading={dispatching === o.id}
-                    disabled={!canDispatch || dispatching !== null}
+                    disabled={!canDispatch || dispatching === o.id}
                   >
-                    Ready and send to delivery
+                    {isDev && (o.courierRequestedAt || o.status !== 'confirmed')
+                      ? 'Ready and send to delivery (again)'
+                      : 'Ready and send to delivery'}
                   </Button>
                 </div>
               </article>

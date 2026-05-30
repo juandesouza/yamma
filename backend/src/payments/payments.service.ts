@@ -5,11 +5,12 @@ import {
   Logger,
   NotFoundException,
   ServiceUnavailableException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { createDb } from '../db';
 import { payments, orders, users, restaurants } from '../db/schema';
-import { and, eq, or, sql } from 'drizzle-orm';
+import { and, desc, eq, or, sql } from 'drizzle-orm';
 import { LemonSqueezeProvider } from './providers/lemon-squeeze.provider';
 import { OrdersService } from '../orders/orders.service';
 import { ConfigService } from '../config/config.service';
@@ -37,6 +38,20 @@ export class PaymentsService {
 
   getProvider() {
     return this.lemon;
+  }
+
+  /** Shared guard for dev-only payment shortcuts (optional `DEV_FORCE_CONFIRM_PAYMENT_TOKEN`). */
+  private assertDevForceConfirmAllowed(presentedToken: string | undefined): void {
+    if (this.config.env !== 'development') {
+      throw new ForbiddenException('Force confirm is only available in development');
+    }
+    const expected = this.config.devForceConfirmPaymentToken;
+    if (expected) {
+      const got = presentedToken?.trim() ?? '';
+      if (!got || got !== expected) {
+        throw new UnauthorizedException('Invalid or missing X-Yamma-Dev-Force-Confirm-Token');
+      }
+    }
   }
 
   private async getPaymentColumnNames(): Promise<Set<string>> {
@@ -464,5 +479,87 @@ export class PaymentsService {
   /** @deprecated Use `syncLemonOrderAfterCheckout` — kept for older clients. */
   async devConfirmLemonReturn(orderId: string, userId: string) {
     return this.syncLemonOrderAfterCheckout(orderId, userId);
+  }
+
+  /**
+   * Development only: mark the order paid/confirmed without calling Lemon (local testing when
+   * webhooks/sync are unavailable). Same side effects as a successful `confirmPayment('completed')`.
+   */
+  async devForceConfirmCheckout(orderId: string, userId: string, presentedToken: string | undefined) {
+    this.assertDevForceConfirmAllowed(presentedToken);
+
+    const order = await this.orders.findById(orderId);
+    if (!order) throw new NotFoundException('Order not found');
+
+    const [restaurantRow] = await this.db
+      .select({ ownerId: restaurants.ownerId })
+      .from(restaurants)
+      .where(eq(restaurants.id, order.restaurantId))
+      .limit(1);
+    const isBuyer = order.userId === userId;
+    const isRestaurantOwner = restaurantRow?.ownerId === userId;
+    if (!isBuyer && !isRestaurantOwner) {
+      throw new ForbiddenException('Not your order');
+    }
+
+    if (order.status !== 'pending') {
+      return { status: 'already_confirmed' as const };
+    }
+
+    await this.confirmPayment(orderId, 'completed');
+    this.logger.warn(
+      `devForceConfirmCheckout: order ${orderId} confirmed (${isBuyer ? 'buyer' : 'seller'}) without Lemon verification`,
+    );
+    return { status: 'confirmed' as const };
+  }
+
+  /**
+   * Development only: confirm latest `pending` order — as buyer (`customer`) or at your restaurant (`seller`).
+   */
+  async devForceConfirmLatestPending(
+    userId: string,
+    presentedToken: string | undefined,
+    scope: 'customer' | 'seller' = 'customer',
+  ): Promise<
+    | { status: 'confirmed'; orderId: string; scope: 'customer' | 'seller' }
+    | { status: 'no_pending'; scope: 'customer' | 'seller' }
+    | { status: 'already_confirmed'; orderId: string; scope: 'customer' | 'seller' }
+  > {
+    this.assertDevForceConfirmAllowed(presentedToken);
+
+    let orderId: string | null = null;
+    if (scope === 'customer') {
+      const [row] = await this.db
+        .select({ id: orders.id })
+        .from(orders)
+        .where(and(eq(orders.userId, userId), eq(orders.status, 'pending')))
+        .orderBy(desc(orders.createdAt))
+        .limit(1);
+      orderId = row?.id ?? null;
+    } else {
+      const [row] = await this.db
+        .select({ id: orders.id })
+        .from(orders)
+        .innerJoin(restaurants, eq(orders.restaurantId, restaurants.id))
+        .where(and(eq(restaurants.ownerId, userId), eq(orders.status, 'pending')))
+        .orderBy(desc(orders.createdAt))
+        .limit(1);
+      orderId = row?.id ?? null;
+    }
+
+    if (!orderId) {
+      return { status: 'no_pending', scope };
+    }
+
+    const order = await this.orders.findById(orderId);
+    if (!order || order.status !== 'pending') {
+      return { status: 'already_confirmed', orderId, scope };
+    }
+
+    await this.confirmPayment(orderId, 'completed');
+    this.logger.warn(
+      `devForceConfirmLatestPending: order ${orderId} confirmed (${scope}) without Lemon verification`,
+    );
+    return { status: 'confirmed', orderId, scope };
   }
 }

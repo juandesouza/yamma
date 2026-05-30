@@ -1,10 +1,12 @@
 'use client';
 
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { clearCartIfAwaitingOrderPaid } from '@/lib/cart-storage';
+import { resolvePendingAfterLemonReturn, shouldFakeConfirmPendingLemon } from '@/lib/resolve-pending-lemon-dev';
 
+/** Must match Yamma API (Socket.IO on same Nest app). Backend default PORT is 3001. */
 const WS_BASE = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:3001';
 
 type OrderRow = {
@@ -29,9 +31,7 @@ const STEPS: { key: string; label: string }[] = [
 
 export default function OrderTrackingPage() {
   const params = useParams();
-  const search = useSearchParams();
   const id = params.id as string;
-  const fromLemon = search.get('from') === 'lemon';
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [handoffNotice, setHandoffNotice] = useState(false);
@@ -44,14 +44,10 @@ export default function OrderTrackingPage() {
       if (res.ok) {
         let data = (await res.json()) as OrderRow;
         // Lemon redirects here immediately after checkout; ask backend to sync once if still pending.
-        if (fromLemon && data.status === 'pending') {
-          const cr = await fetch('/api/payments/lemon/sync-order', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ orderId: id }),
-          });
-          if (cr.ok) {
+        // Development: after Lemon checkout, webhooks/sync rarely work on localhost — sync + optional fake confirm.
+        if (data.status === 'pending' && shouldFakeConfirmPendingLemon()) {
+          const resolved = await resolvePendingAfterLemonReturn(id);
+          if (resolved) {
             const refreshed = await fetch(`/api/orders/${id}`, {
               credentials: 'include',
               cache: 'no-store',
@@ -76,12 +72,12 @@ export default function OrderTrackingPage() {
         socket?.emit('subscribe:order', { orderId: id });
       });
       socket.on('order:status', (msg: { orderId?: string; status?: string }) => {
-        if (msg?.orderId === id && msg.status) {
+        if (msg?.orderId && msg.status && msg.orderId.toLowerCase() === id.toLowerCase()) {
           setOrder((o) => (o ? { ...o, status: msg.status! } : o));
         }
       });
       socket.on('order:courier_handoff', (msg: { orderId?: string }) => {
-        if (msg?.orderId === id) {
+        if (msg?.orderId && msg.orderId.toLowerCase() === id.toLowerCase()) {
           setHandoffNotice(true);
           setOrder((o) => (o ? { ...o, courierRequestedAt: new Date().toISOString() } : o));
         }
@@ -93,7 +89,20 @@ export default function OrderTrackingPage() {
     return () => {
       socket?.disconnect();
     };
-  }, [id, fromLemon]);
+  }, [id]);
+
+  /** Partner webhooks update the DB before/without a reliable socket; refresh until we leave `confirmed`. */
+  useEffect(() => {
+    if (!order || order.status !== 'confirmed' || !order.courierRequestedAt) return;
+    const intervalMs = 4000;
+    const handle = setInterval(async () => {
+      const res = await fetch(`/api/orders/${id}`, { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) return;
+      const data = (await res.json()) as OrderRow;
+      setOrder((prev) => (prev ? { ...prev, ...data } : data));
+    }, intervalMs);
+    return () => clearInterval(handle);
+  }, [id, order?.status, order?.courierRequestedAt]);
 
   useEffect(() => {
     if (!order || order.status === 'pending') return;

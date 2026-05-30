@@ -51,6 +51,11 @@ export const configValidationSchema = z.object({
   /** e.g. USDC_POLYGON */
   RAMP_USDC_SWAP_ASSET: z.string().optional(),
   MOONPAY_WEBHOOK_SECRET: z.string().optional(),
+  /**
+   * Local-only: if set, `POST /payments/dev/force-confirm-checkout` requires the same value in
+   * `X-Yamma-Dev-Force-Confirm-Token`. Unset = development mode only, no extra secret.
+   */
+  DEV_FORCE_CONFIRM_PAYMENT_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof configValidationSchema>;

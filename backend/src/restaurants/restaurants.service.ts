@@ -2,12 +2,14 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { createDb } from '../db';
 import { restaurants, menus, menuItems } from '../db/schema';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { randomBytes } from 'crypto';
+import { UsersService } from '../users/users.service';
 
 export interface CreateRestaurantForOwnerInput {
   name: string;
@@ -39,6 +41,39 @@ export interface UpdateRestaurantForOwnerInput {
 const GUEST_SELLER_DEMO_LAT = '38.9028000';
 const GUEST_SELLER_DEMO_LNG = '-77.0365000';
 
+const GUEST_SELLER_DEMO_ADDRESS = {
+  address: '700 Pennsylvania Avenue NW, Washington, DC 20004',
+  addressStreet: '700 Pennsylvania Avenue NW',
+  addressCity: 'Washington',
+  addressState: 'DC',
+  addressZip: '20004',
+} as const;
+
+/** Parses "street, city, ST zip" into split columns required by legacy production schema. */
+function splitUsAddressFields(fullAddress: string): {
+  addressStreet: string;
+  addressCity: string;
+  addressState: string;
+  addressZip: string;
+} {
+  const trimmed = fullAddress.trim();
+  const match = trimmed.match(/^(.+?),\s*([^,]+?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)\s*$/);
+  if (match) {
+    return {
+      addressStreet: match[1].trim(),
+      addressCity: match[2].trim(),
+      addressState: match[3].toUpperCase(),
+      addressZip: match[4],
+    };
+  }
+  return {
+    addressStreet: trimmed,
+    addressCity: 'Unknown',
+    addressState: 'NA',
+    addressZip: '00000',
+  };
+}
+
 /** Unsplash source photos for guest-seller demo items (prior IDs returned 404 via imgix). */
 const GUEST_SELLER_MENU_IMAGE_STREET_CORN =
   'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?w=800&q=80';
@@ -47,7 +82,10 @@ const GUEST_SELLER_MENU_IMAGE_KEY_LIME_TART =
 
 @Injectable()
 export class RestaurantsService {
+  private readonly logger = new Logger(RestaurantsService.name);
   private db = createDb(process.env.DATABASE_URL!);
+
+  constructor(private readonly users: UsersService) {}
 
   private makeSlug(name: string): string {
     const base = name
@@ -66,6 +104,15 @@ export class RestaurantsService {
       .where(eq(restaurants.ownerId, ownerId))
       .limit(1);
     return r ?? null;
+  }
+
+  /**
+   * Ensures the shared guest seller demo restaurant exists so buyer sessions (guest or Google)
+   * can browse it without visiting seller guest login first.
+   */
+  async ensureGuestSellerDemoForBuyers(): Promise<void> {
+    const seller = await this.users.ensureGuestUser('seller');
+    await this.seedGuestSellerDemoIfNeeded(seller.id);
   }
 
   /**
@@ -114,11 +161,12 @@ export class RestaurantsService {
         description:
           'Pre-seeded demo for guest seller — Latin menu with photos. Near DC so buyer guests see it in their nearby list.',
         cuisine: 'Latin / Mexican',
-        address: '700 Pennsylvania Avenue NW, Washington, DC 20004',
+        ...GUEST_SELLER_DEMO_ADDRESS,
         latitude: GUEST_SELLER_DEMO_LAT,
         longitude: GUEST_SELLER_DEMO_LNG,
         imageUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&q=80',
         isOpen: true,
+        isActive: true,
       })
       .returning();
     if (!restaurant) throw new Error('Guest restaurant seed failed');
@@ -140,9 +188,10 @@ export class RestaurantsService {
         description:
           'Pre-seeded demo for guest seller — Latin menu with photos. Near DC so buyer guests see it in their nearby list.',
         cuisine: 'Latin / Mexican',
-        address: '700 Pennsylvania Avenue NW, Washington, DC 20004',
+        ...GUEST_SELLER_DEMO_ADDRESS,
         latitude: GUEST_SELLER_DEMO_LAT,
         longitude: GUEST_SELLER_DEMO_LNG,
+        isActive: true,
         updatedAt: new Date(),
       })
       .where(eq(restaurants.id, r.id));
@@ -244,6 +293,8 @@ export class RestaurantsService {
       throw new ConflictException('You already have a restaurant profile. Add menu items below.');
     }
     const slug = this.makeSlug(input.name);
+    const address = input.address.trim();
+    const split = splitUsAddressFields(address);
     const [row] = await this.db
       .insert(restaurants)
       .values({
@@ -252,11 +303,16 @@ export class RestaurantsService {
         slug,
         description: input.description?.trim() || null,
         cuisine: input.cuisine?.trim() || null,
-        address: input.address.trim(),
+        address,
+        addressStreet: split.addressStreet,
+        addressCity: split.addressCity,
+        addressState: split.addressState,
+        addressZip: split.addressZip,
         latitude: input.latitude.toFixed(7),
         longitude: input.longitude.toFixed(7),
         imageUrl: input.imageUrl?.trim() || null,
         isOpen: true,
+        isActive: true,
       })
       .returning();
     if (!row) throw new Error('Restaurant insert failed');
@@ -311,7 +367,14 @@ export class RestaurantsService {
     if (input.name !== undefined) patch.name = input.name.trim();
     if (input.description !== undefined) patch.description = input.description.trim() || null;
     if (input.cuisine !== undefined) patch.cuisine = input.cuisine.trim() || null;
-    if (input.address !== undefined) patch.address = input.address.trim();
+    if (input.address !== undefined) {
+      patch.address = input.address.trim();
+      const split = splitUsAddressFields(patch.address as string);
+      patch.addressStreet = split.addressStreet;
+      patch.addressCity = split.addressCity;
+      patch.addressState = split.addressState;
+      patch.addressZip = split.addressZip;
+    }
     if (input.imageUrl !== undefined) patch.imageUrl = input.imageUrl.trim() || null;
     if (input.latitude !== undefined) patch.latitude = input.latitude.toFixed(7);
     if (input.longitude !== undefined) patch.longitude = input.longitude.toFixed(7);
@@ -332,12 +395,18 @@ export class RestaurantsService {
   }
 
   async findNearby(lat: number, lng: number, limit = 120, offset = 0) {
+    try {
+      await this.ensureGuestSellerDemoForBuyers();
+    } catch (e) {
+      this.logger.warn(`Guest seller demo ensure failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
     const cap = Math.min(200, Math.max(1, limit));
     const skip = Math.max(0, Math.min(offset, 5000));
     const list = await this.db
       .select()
       .from(restaurants)
-      .where(eq(restaurants.isOpen, true));
+      .where(and(eq(restaurants.isOpen, true), eq(restaurants.isActive, true)));
     const visible: typeof list = [];
     for (const r of list) {
       const [sellable] = await this.db

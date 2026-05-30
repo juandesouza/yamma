@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { isGuestUser } from '@/lib/auth-constants';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-
+import { BACKEND_API_URL as API } from '@/lib/backend-api-url';
 /** Returns current user from backend session cookie (for client components). */
 export async function GET(req: Request) {
   try {

@@ -1,7 +1,6 @@
 import { cookies } from 'next/headers';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-
+import { BACKEND_API_URL as API } from '@/lib/backend-api-url';
 export interface SessionUser {
   id: string;
   email?: string;

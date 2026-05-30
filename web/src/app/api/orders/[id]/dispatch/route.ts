@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-
+import { BACKEND_API_URL as API } from '@/lib/backend-api-url';
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },

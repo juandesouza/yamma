@@ -99,7 +99,8 @@ export class ConfigService {
 
   get frontendUrl(): string {
     const v = this.nest.get('FRONTEND_URL', { infer: true })?.trim();
-    return v || 'http://localhost:3000';
+    // Default matches `pnpm dev` for web (next dev -p 3005) so Lemon / OAuth redirects don’t collide with another app on :3000.
+    return v || 'http://localhost:3005';
   }
 
   get smtpHost(): string | undefined {
@@ -167,6 +168,12 @@ export class ConfigService {
 
   get moonpayWebhookSecret(): string | undefined {
     return this.nest.get('MOONPAY_WEBHOOK_SECRET', { infer: true });
+  }
+
+  /** Optional shared secret for dev-only payment confirmation (see `DEV_FORCE_CONFIRM_PAYMENT_TOKEN`). */
+  get devForceConfirmPaymentToken(): string | undefined {
+    const v = this.nest.get('DEV_FORCE_CONFIRM_PAYMENT_TOKEN', { infer: true })?.trim();
+    return v || undefined;
   }
 
   /** Origins (scheme + host + optional port) allowed for mobile Lemon `paymentReturnBaseUrl` in production. */

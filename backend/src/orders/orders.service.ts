@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import type { InferSelectModel, SQL } from 'drizzle-orm';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { createDb } from '../db';
@@ -43,6 +43,7 @@ function isPgNotNullViolationOnOrderItemTotalPrice(err: unknown): boolean {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   private db = createDb(process.env.DATABASE_URL!);
   private orderColumnTypesPromise: Promise<Record<string, string>> | null = null;
   constructor(
@@ -427,11 +428,40 @@ export class OrdersService {
     if (!row) return { error: 'not_found' as const };
 
     const o = row.order;
-    if (o.status !== 'confirmed') {
-      return { error: 'invalid_status' as const, message: 'Order must be paid (confirmed) before dispatch.' };
+    const isDev = this.config.env === 'development';
+    if (o.status === 'pending' || o.status === 'cancelled') {
+      return {
+        error: 'invalid_status' as const,
+        message: 'Order must be paid (confirmed) before dispatch.',
+      };
+    }
+    if (!isDev && o.status !== 'confirmed') {
+      return {
+        error: 'invalid_status' as const,
+        message: 'Order must be confirmed before dispatch.',
+      };
     }
     if (o.courierRequestedAt) {
-      return { error: 'already_dispatched' as const, message: 'Delivery partner was already notified.' };
+      if (!isDev) {
+        return { error: 'already_dispatched' as const, message: 'Delivery partner was already notified.' };
+      }
+      this.logger.warn(
+        `Dev-only re-dispatch for order ${orderId} (status=${o.status}, Nexo handoff will run again)`,
+      );
+    } else if (isDev && o.status !== 'confirmed') {
+      this.logger.warn(`Dev-only dispatch for order ${orderId} in status ${o.status}`);
+    }
+    const restaurantLat = Number(row.restaurant.latitude);
+    const restaurantLng = Number(row.restaurant.longitude);
+    const customerLat = o.deliveryLatitude ? Number(o.deliveryLatitude) : Number.NaN;
+    const customerLng = o.deliveryLongitude ? Number(o.deliveryLongitude) : Number.NaN;
+    if (
+      !Number.isFinite(restaurantLat) ||
+      !Number.isFinite(restaurantLng) ||
+      !Number.isFinite(customerLat) ||
+      !Number.isFinite(customerLng)
+    ) {
+      return { error: 'invalid_status' as const, message: 'Order must have valid pickup and drop-off coordinates before dispatch.' };
     }
 
     const now = new Date();
@@ -444,28 +474,22 @@ export class OrdersService {
 
     const dispatchPayload = {
       orderId: updated.id,
-      restaurantId: row.restaurant.id,
-      pickup: {
-        address: row.restaurant.address,
-        latitude: Number(row.restaurant.latitude),
-        longitude: Number(row.restaurant.longitude),
-      },
-      dropoff: {
-        address: updated.deliveryAddress,
-        latitude: updated.deliveryLatitude ? Number(updated.deliveryLatitude) : null,
-        longitude: updated.deliveryLongitude ? Number(updated.deliveryLongitude) : null,
-      },
-      total: updated.total,
-      currency: updated.currency ?? 'USD',
-      createdAt: updated.createdAt,
+      restaurantLat,
+      restaurantLng,
+      customerLat,
+      customerLng,
     };
 
     this.events.emitOrderCourierHandoff(orderId);
 
     const dispatchUrl = this.config.deliveryDispatchUrl?.trim() || '';
-    if (dispatchUrl) {
+    if (!dispatchUrl) {
+      this.logger.warn(
+        'DELIVERY_DISPATCH_URL is not set — Nexo (or another partner) will not receive this handoff. Drivers get no delivery offer.',
+      );
+    } else {
       try {
-        await fetch(dispatchUrl, {
+        const res = await fetch(dispatchUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -475,8 +499,18 @@ export class OrdersService {
           },
           body: JSON.stringify(dispatchPayload),
         });
-      } catch {
-        // Partner app may be offline during local development.
+        if (!res.ok) {
+          const snippet = (await res.text()).slice(0, 400);
+          this.logger.warn(
+            `Delivery dispatch to ${dispatchUrl} returned HTTP ${res.status}. Body: ${snippet}`,
+          );
+        } else {
+          this.logger.log(`Delivery handoff POST ok orderId=${orderId}`);
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Delivery handoff fetch failed (${dispatchUrl}): ${err instanceof Error ? err.message : err}`,
+        );
       }
     }
 
