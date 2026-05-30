@@ -5,7 +5,10 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Button } from '@yamma/design-system';
 import { clearCartIfAwaitingOrderPaid } from '@/lib/cart-storage';
-import { resolvePendingAfterLemonReturn } from '@/lib/resolve-pending-lemon-dev';
+import {
+  resolvePendingAfterLemonReturn,
+  syncLemonOrderAfterReturn,
+} from '@/lib/resolve-pending-lemon-dev';
 
 const POLL_MS = 2000;
 const MAX_POLLS = 90;
@@ -24,6 +27,7 @@ export function CheckoutReturnPageClient() {
     const oid = orderId;
 
     let pollCount = 0;
+    let syncAttempted = false;
     let devConfirmAttempted = false;
     let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -43,6 +47,17 @@ export function CheckoutReturnPageClient() {
           if (timer) clearInterval(timer);
           window.location.replace(`/order/${oid}`);
           return;
+        }
+        if (s === 'pending' && !syncAttempted) {
+          syncAttempted = true;
+          const synced = await syncLemonOrderAfterReturn(oid);
+          if (synced) {
+            clearCartIfAwaitingOrderPaid(oid);
+            setStatus('ready');
+            if (timer) clearInterval(timer);
+            window.location.replace(`/order/${oid}?from=lemon`);
+            return;
+          }
         }
         if (s === 'pending' && pollCount >= 3 && !devConfirmAttempted) {
           devConfirmAttempted = true;

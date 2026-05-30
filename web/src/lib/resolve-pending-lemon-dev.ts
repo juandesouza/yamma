@@ -16,21 +16,29 @@ export function shouldFakeConfirmPendingLemon(): boolean {
   return process.env.NODE_ENV === 'development';
 }
 
-/** Returns true if order is no longer pending (confirmed or beyond). */
-export async function resolvePendingAfterLemonReturn(orderId: string): Promise<boolean> {
+/** Ask the API to confirm a paid Lemon checkout (production-safe). */
+export async function syncLemonOrderAfterReturn(orderId: string): Promise<boolean> {
   const syncRes = await fetch('/api/payments/lemon/sync-order', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify({ orderId }),
   });
-  void syncRes; // may be 401/200 with still_pending body
-
+  if (syncRes.ok) {
+    const out = (await syncRes.json().catch(() => ({}))) as { status?: string };
+    if (out.status === 'confirmed' || out.status === 'already_confirmed') return true;
+  }
   const afterSync = await fetch(`/api/orders/${orderId}`, { credentials: 'include', cache: 'no-store' });
   if (afterSync.ok) {
     const row = (await afterSync.json()) as { status?: string };
     if (row?.status && row.status !== 'pending') return true;
   }
+  return false;
+}
+
+/** Returns true if order is no longer pending (confirmed or beyond). */
+export async function resolvePendingAfterLemonReturn(orderId: string): Promise<boolean> {
+  if (await syncLemonOrderAfterReturn(orderId)) return true;
 
   if (!shouldFakeConfirmPendingLemon()) return false;
 

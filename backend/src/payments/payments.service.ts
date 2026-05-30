@@ -462,6 +462,8 @@ export class PaymentsService {
 
     const matched = await this.lemon.lookupPaidOrderForSync({
       storeId,
+      yammaOrderId: orderId,
+      checkoutId: p.providerPaymentId ?? null,
       yammaTotalUsd: order.total,
       userEmail: u?.email ?? null,
       paymentCreatedAt: p.createdAt,

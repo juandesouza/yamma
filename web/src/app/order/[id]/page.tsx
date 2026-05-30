@@ -1,10 +1,13 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { clearCartIfAwaitingOrderPaid } from '@/lib/cart-storage';
-import { resolvePendingAfterLemonReturn, shouldFakeConfirmPendingLemon } from '@/lib/resolve-pending-lemon-dev';
+import {
+  resolvePendingAfterLemonReturn,
+  syncLemonOrderAfterReturn,
+} from '@/lib/resolve-pending-lemon-dev';
 
 /** Must match Yamma API (Socket.IO on same Nest app). Backend default PORT is 3001. */
 const WS_BASE = process.env.NEXT_PUBLIC_WS_URL ?? 'http://localhost:3001';
@@ -31,7 +34,9 @@ const STEPS: { key: string; label: string }[] = [
 
 export default function OrderTrackingPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const id = params.id as string;
+  const fromLemon = searchParams.get('from') === 'lemon';
   const [order, setOrder] = useState<OrderRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [handoffNotice, setHandoffNotice] = useState(false);
@@ -43,9 +48,17 @@ export default function OrderTrackingPage() {
       const res = await fetch(`/api/orders/${id}`, { credentials: 'include', cache: 'no-store' });
       if (res.ok) {
         let data = (await res.json()) as OrderRow;
-        // Lemon redirects here immediately after checkout; ask backend to sync once if still pending.
-        // Development: after Lemon checkout, webhooks/sync rarely work on localhost — sync + optional fake confirm.
-        if (data.status === 'pending' && shouldFakeConfirmPendingLemon()) {
+        // Lemon redirects here after checkout; webhooks are often missing in prod — sync via Lemon Orders API.
+        if (data.status === 'pending' && fromLemon) {
+          const synced = await syncLemonOrderAfterReturn(id);
+          if (synced) {
+            const refreshed = await fetch(`/api/orders/${id}`, {
+              credentials: 'include',
+              cache: 'no-store',
+            });
+            if (refreshed.ok) data = (await refreshed.json()) as OrderRow;
+          }
+        } else if (data.status === 'pending') {
           const resolved = await resolvePendingAfterLemonReturn(id);
           if (resolved) {
             const refreshed = await fetch(`/api/orders/${id}`, {
@@ -89,7 +102,27 @@ export default function OrderTrackingPage() {
     return () => {
       socket?.disconnect();
     };
-  }, [id]);
+  }, [id, fromLemon]);
+
+  /** Lemon can take a few seconds to mark the order paid — keep syncing after redirect. */
+  useEffect(() => {
+    if (!fromLemon || !order || order.status !== 'pending') return;
+    let attempts = 0;
+    const timer = setInterval(async () => {
+      attempts += 1;
+      const synced = await syncLemonOrderAfterReturn(id);
+      if (synced) {
+        const res = await fetch(`/api/orders/${id}`, { credentials: 'include', cache: 'no-store' });
+        if (res.ok) {
+          const data = (await res.json()) as OrderRow;
+          setOrder(data);
+          clearCartIfAwaitingOrderPaid(id);
+        }
+      }
+      if (attempts >= 15) clearInterval(timer);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [id, fromLemon, order?.status]);
 
   /** Partner webhooks update the DB before/without a reliable socket; refresh until we leave `confirmed`. */
   useEffect(() => {

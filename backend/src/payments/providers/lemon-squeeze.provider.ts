@@ -294,10 +294,12 @@ export class LemonSqueezeProvider implements IPaymentProvider {
 
   /**
    * When webhooks cannot reach the API (localhost, wrong URL, etc.), ask Lemon which orders are paid
-   * and match our pending checkout by store, buyer email, amount, and time.
+   * and match our pending checkout by checkout id, custom orderId, store, amount, and time.
    */
   async lookupPaidOrderForSync(input: {
     storeId: string;
+    yammaOrderId: string;
+    checkoutId?: string | null;
     yammaTotalUsd: string;
     userEmail: string | null;
     paymentCreatedAt: Date;
@@ -307,6 +309,116 @@ export class LemonSqueezeProvider implements IPaymentProvider {
     const expectedCents = Math.round(Number(input.yammaTotalUsd) * 100);
     if (!Number.isFinite(expectedCents) || expectedCents <= 0) return false;
 
+    if (input.checkoutId?.trim()) {
+      const viaCheckout = await this.resolvePaidViaCheckout({
+        checkoutId: input.checkoutId.trim(),
+        yammaOrderId: input.yammaOrderId,
+        expectedCents,
+        lemonTestMode: input.lemonTestMode,
+      });
+      if (viaCheckout) return true;
+    }
+
+    const matched = await this.matchPaidOrderInStoreList(input, expectedCents);
+    if (matched) return true;
+
+    // Test/live mismatch is a common misconfig — retry the other mode once.
+    if (matched === false) {
+      return this.matchPaidOrderInStoreList(
+        { ...input, lemonTestMode: !input.lemonTestMode },
+        expectedCents,
+      );
+    }
+    return false;
+  }
+
+  private async resolvePaidViaCheckout(input: {
+    checkoutId: string;
+    yammaOrderId: string;
+    expectedCents: number;
+    lemonTestMode: boolean;
+  }): Promise<boolean> {
+    let res: Response;
+    try {
+      res = await fetch(
+        `${LEMON_API}/checkouts/${encodeURIComponent(input.checkoutId)}?include=order`,
+        {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            Accept: 'application/vnd.api+json',
+          },
+        },
+      );
+    } catch (e) {
+      this.logger.warn(`Lemon checkout lookup failed: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+    const rawText = await res.text();
+    if (!res.ok) {
+      this.logger.warn(`Lemon checkout HTTP ${res.status}: ${rawText.slice(0, 300)}`);
+      return false;
+    }
+    let json: {
+      included?: Array<{ type?: string; attributes?: Record<string, unknown> }>;
+    };
+    try {
+      json = JSON.parse(rawText) as typeof json;
+    } catch {
+      return false;
+    }
+    const order = (json.included ?? []).find((row) => row.type === 'orders');
+    if (!order?.attributes) return false;
+    return this.orderAttributesMatchYamma(input.yammaOrderId, input.expectedCents, input.lemonTestMode, order.attributes);
+  }
+
+  private extractYammaOrderIdFromAttributes(attributes: Record<string, unknown>): string | null {
+    const checkoutData = attributes.checkout_data;
+    if (checkoutData && typeof checkoutData === 'object') {
+      const custom = (checkoutData as { custom?: Record<string, unknown> }).custom;
+      if (custom) {
+        const raw = custom.orderId ?? custom.order_id;
+        if (raw != null && String(raw).trim()) return String(raw).trim();
+      }
+    }
+    const metaCustom = attributes.meta;
+    if (metaCustom && typeof metaCustom === 'object') {
+      const custom = (metaCustom as { custom_data?: Record<string, unknown> }).custom_data;
+      if (custom) {
+        const raw = custom.orderId ?? custom.order_id;
+        if (raw != null && String(raw).trim()) return String(raw).trim();
+      }
+    }
+    return null;
+  }
+
+  private orderAttributesMatchYamma(
+    yammaOrderId: string,
+    expectedCents: number,
+    lemonTestMode: boolean,
+    attributes: Record<string, unknown>,
+  ): boolean {
+    const st = typeof attributes.status === 'string' ? attributes.status.toLowerCase() : '';
+    if (st !== 'paid') return false;
+    const total = typeof attributes.total === 'number' ? attributes.total : Number(attributes.total);
+    if (!Number.isFinite(total) || total !== expectedCents) return false;
+    const tm = Boolean(attributes.test_mode);
+    if (tm !== lemonTestMode) return false;
+    const customOrderId = this.extractYammaOrderIdFromAttributes(attributes);
+    if (customOrderId && customOrderId.toLowerCase() !== yammaOrderId.toLowerCase()) return false;
+    return true;
+  }
+
+  private async matchPaidOrderInStoreList(
+    input: {
+      storeId: string;
+      yammaOrderId: string;
+      yammaTotalUsd: string;
+      userEmail: string | null;
+      paymentCreatedAt: Date;
+      lemonTestMode: boolean;
+    },
+    expectedCents: number,
+  ): Promise<boolean> {
     const params = new URLSearchParams();
     params.set('filter[store_id]', String(input.storeId));
     params.set('page[size]', '40');
@@ -347,12 +459,11 @@ export class LemonSqueezeProvider implements IPaymentProvider {
     const candidates: { created: number }[] = [];
     for (const row of rows) {
       const a = row.attributes ?? {};
-      const st = typeof a.status === 'string' ? a.status.toLowerCase() : '';
-      if (st !== 'paid') continue;
-      const total = typeof a.total === 'number' ? a.total : Number(a.total);
-      if (!Number.isFinite(total) || total !== expectedCents) continue;
-      const tm = Boolean(a.test_mode);
-      if (tm !== input.lemonTestMode) continue;
+      if (
+        !this.orderAttributesMatchYamma(input.yammaOrderId, expectedCents, input.lemonTestMode, a)
+      ) {
+        continue;
+      }
       const createdRaw = a.created_at;
       const createdMs =
         typeof createdRaw === 'string' ? Date.parse(createdRaw) : createdRaw instanceof Date ? createdRaw.getTime() : NaN;
