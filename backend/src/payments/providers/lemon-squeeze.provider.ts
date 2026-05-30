@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '../../config/config.service';
 import type { IPaymentProvider, CreatePaymentInput, PaymentResult } from '../payment-provider.interface';
-import crypto from 'crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 const LEMON_API = 'https://api.lemonsqueezy.com/v1';
 
@@ -265,11 +265,11 @@ export class LemonSqueezeProvider implements IPaymentProvider {
   verifyWebhook(payload: string | Buffer, signature: string | undefined): boolean {
     if (!this.webhookSecret || signature == null || signature === '') return false;
     const bodyBuf = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, 'utf8');
-    const digestHex = crypto.createHmac('sha256', this.webhookSecret).update(bodyBuf).digest('hex');
+    const digestHex = createHmac('sha256', this.webhookSecret).update(bodyBuf).digest('hex');
     const digestBuf = Buffer.from(digestHex, 'utf8');
     const sigBuf = Buffer.from(signature.trim(), 'utf8');
     if (sigBuf.length !== digestBuf.length) return false;
-    return crypto.timingSafeEqual(sigBuf, digestBuf);
+    return timingSafeEqual(sigBuf, digestBuf);
   }
 
   async handleWebhook(payload: unknown): Promise<{ orderId: string; status: 'completed' | 'failed' } | null> {
@@ -338,37 +338,67 @@ export class LemonSqueezeProvider implements IPaymentProvider {
     expectedCents: number;
     lemonTestMode: boolean;
   }): Promise<boolean> {
-    let res: Response;
+    const headers = {
+      Authorization: `Bearer ${this.apiKey}`,
+      Accept: 'application/vnd.api+json',
+    };
+    let checkoutRes: Response;
     try {
-      res = await fetch(
-        `${LEMON_API}/checkouts/${encodeURIComponent(input.checkoutId)}?include=order`,
-        {
-          headers: {
-            Authorization: `Bearer ${this.apiKey}`,
-            Accept: 'application/vnd.api+json',
-          },
-        },
-      );
+      checkoutRes = await fetch(`${LEMON_API}/checkouts/${encodeURIComponent(input.checkoutId)}`, {
+        headers,
+      });
     } catch (e) {
       this.logger.warn(`Lemon checkout lookup failed: ${e instanceof Error ? e.message : e}`);
       return false;
     }
-    const rawText = await res.text();
-    if (!res.ok) {
-      this.logger.warn(`Lemon checkout HTTP ${res.status}: ${rawText.slice(0, 300)}`);
+    const checkoutRaw = await checkoutRes.text();
+    if (!checkoutRes.ok) {
+      this.logger.warn(`Lemon checkout HTTP ${checkoutRes.status}: ${checkoutRaw.slice(0, 300)}`);
       return false;
     }
-    let json: {
-      included?: Array<{ type?: string; attributes?: Record<string, unknown> }>;
+    let checkoutJson: {
+      data?: {
+        relationships?: {
+          order?: { data?: { id?: string | number } };
+        };
+      };
     };
     try {
-      json = JSON.parse(rawText) as typeof json;
+      checkoutJson = JSON.parse(checkoutRaw) as typeof checkoutJson;
     } catch {
       return false;
     }
-    const order = (json.included ?? []).find((row) => row.type === 'orders');
-    if (!order?.attributes) return false;
-    return this.orderAttributesMatchYamma(input.yammaOrderId, input.expectedCents, input.lemonTestMode, order.attributes);
+    const lemonOrderId = checkoutJson.data?.relationships?.order?.data?.id;
+    if (lemonOrderId == null || String(lemonOrderId).trim() === '') return false;
+
+    let orderRes: Response;
+    try {
+      orderRes = await fetch(`${LEMON_API}/orders/${encodeURIComponent(String(lemonOrderId))}`, {
+        headers,
+      });
+    } catch (e) {
+      this.logger.warn(`Lemon order lookup failed: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+    const orderRaw = await orderRes.text();
+    if (!orderRes.ok) {
+      this.logger.warn(`Lemon order HTTP ${orderRes.status}: ${orderRaw.slice(0, 300)}`);
+      return false;
+    }
+    let orderJson: { data?: { attributes?: Record<string, unknown> } };
+    try {
+      orderJson = JSON.parse(orderRaw) as typeof orderJson;
+    } catch {
+      return false;
+    }
+    const attributes = orderJson.data?.attributes;
+    if (!attributes) return false;
+    return this.orderAttributesMatchYamma(
+      input.yammaOrderId,
+      input.expectedCents,
+      input.lemonTestMode,
+      attributes,
+    );
   }
 
   private extractYammaOrderIdFromAttributes(attributes: Record<string, unknown>): string | null {
@@ -422,7 +452,6 @@ export class LemonSqueezeProvider implements IPaymentProvider {
     const params = new URLSearchParams();
     params.set('filter[store_id]', String(input.storeId));
     params.set('page[size]', '40');
-    params.set('sort', '-created_at');
     const email = input.userEmail?.trim();
     if (email) {
       params.set('filter[user_email]', email);
