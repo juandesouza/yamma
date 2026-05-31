@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Headers, Param, BadRequestException } from '@nestjs/common';
 import { DeliveryService } from './delivery.service';
 import { ConfigService } from '../config/config.service';
-import crypto from 'crypto';
+import { createHmac } from 'node:crypto';
 import type { DeliveryWebhookPayload } from './delivery.types';
 
 @Controller('delivery')
@@ -30,7 +30,7 @@ export class DeliveryController {
   ) {
     const secret = this.config.deliveryWebhookSecret;
     if (secret && signature) {
-      const expected = crypto.createHmac('sha256', secret).update(JSON.stringify(body)).digest('hex');
+      const expected = createHmac('sha256', secret).update(JSON.stringify(body)).digest('hex');
       if (signature !== expected) throw new BadRequestException('Invalid signature');
     }
     await this.delivery.handleWebhook(body);
