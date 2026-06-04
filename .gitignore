@@ -3,6 +3,7 @@ backend/.env
 backend/.env.local
 web/.env
 web/.env.local
+mobile/.env
 mobile/.env.local
 
 node_modules
