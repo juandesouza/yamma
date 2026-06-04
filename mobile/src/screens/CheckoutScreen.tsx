@@ -262,15 +262,11 @@ export default function CheckoutScreen() {
       }
 
       /**
-       * Android `openAuthSessionAsync` is a polyfill: it waits for `Linking` with
-       * `event.url.startsWith(returnUrl)`. That event is the **exp:// / yamma://** deep link from the
-       * return bridge, not the https:// bridge URL — using the server https URL never matched, the
-       * session fell through to AppState/dismiss, and Chrome often showed ERR_CONNECTION_CLOSED when
-       * the in-tab page jumped to exp://. iOS uses native ASWebAuthenticationSession and must keep
-       * the https redirect URL Lemon opens after payment.
+       * Use the same HTTPS return URL Lemon opens on both platforms. The bridge page redirects to
+       * exp:// / yamma://; if that lookup fails, openAuthSessionAsync still completes on the https
+       * URL and CheckoutScreen navigates to order tracking with the known orderId.
        */
-      const authSessionReturnUrl =
-        Platform.OS === 'android' ? Linking.createURL('payment-return') : successRedirectUrl;
+      const authSessionReturnUrl = successRedirectUrl;
 
       const browserResult = await WebBrowser.openAuthSessionAsync(checkoutUrl, authSessionReturnUrl);
 

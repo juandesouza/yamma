@@ -14,7 +14,7 @@ function parseResumeTarget(toParam: string | undefined): string | null {
   }
   try {
     const u = new URL(t);
-    if (u.protocol !== 'exp:' && u.protocol !== 'yamma:') return null;
+    if (u.protocol !== 'exp:' && u.protocol !== 'yamma:' && u.protocol !== 'expo:') return null;
     return t;
   } catch {
     return null;

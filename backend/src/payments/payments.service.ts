@@ -7,10 +7,10 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { randomBytes } from 'node:crypto';
 import { createDb } from '../db';
 import { payments, orders, users, restaurants } from '../db/schema';
-import { and, desc, eq, or, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { LemonSqueezeProvider } from './providers/lemon-squeeze.provider';
 import { OrdersService } from '../orders/orders.service';
 import { ConfigService } from '../config/config.service';
@@ -105,31 +105,106 @@ export class PaymentsService {
     return Array.from(labels)[0] ?? null;
   }
 
+  private isAllowedMobileResumeProtocol(protocol: string): boolean {
+    return protocol === 'exp:' || protocol === 'yamma:' || protocol === 'expo:';
+  }
+
+  private buildMobileResumeFallback(orderId: string, restaurantId?: string): string {
+    const q = restaurantId?.trim()
+      ? `orderId=${encodeURIComponent(orderId)}&restaurantId=${encodeURIComponent(restaurantId.trim())}`
+      : `orderId=${encodeURIComponent(orderId)}`;
+    return `yamma://payment-return?${q}`;
+  }
+
+  private parseStoredMobileResumeUrl(
+    metadataRaw: string | null | undefined,
+    orderId: string | null | undefined,
+    restaurantId?: string,
+  ): string | null {
+    if (metadataRaw?.trim()) {
+      try {
+        const m = JSON.parse(metadataRaw) as {
+          mobileResumeUrl?: string;
+          orderId?: string;
+          restaurantId?: string;
+        };
+        const url = m.mobileResumeUrl?.trim();
+        if (url) {
+          try {
+            const u = new URL(url);
+            if (this.isAllowedMobileResumeProtocol(u.protocol)) return url;
+          } catch {
+            if (/^(exp|yamma|expo):\/\//i.test(url)) return url;
+          }
+        }
+        const oid = m.orderId?.trim() || orderId?.trim();
+        if (oid) return this.buildMobileResumeFallback(oid, m.restaurantId ?? restaurantId);
+      } catch {
+        /* fall through */
+      }
+    }
+    const oid = orderId?.trim();
+    return oid ? this.buildMobileResumeFallback(oid, restaurantId) : null;
+  }
+
   /** Resolves stored Expo / dev-client deep link for Lemon return URL `/payment/return/:token`. */
   async getMobileResumeUrlByReturnToken(token: string): Promise<string | null> {
     const t = token?.trim().toLowerCase();
     if (!t || !/^[a-f0-9]{32}$/.test(t)) return null;
-    const [p] = await this.db
-      .select({ metadata: payments.metadata })
-      .from(payments)
-      .where(
-        or(
-          eq(payments.returnToken, t),
-          sql`(metadata::jsonb->>'lemonReturnToken') = ${t}`,
-        ),
-      )
-      .limit(1);
-    if (!p?.metadata) return null;
-    try {
-      const m = JSON.parse(p.metadata) as { mobileResumeUrl?: string };
-      const url = m.mobileResumeUrl?.trim();
-      if (!url) return null;
-      const u = new URL(url);
-      if (u.protocol !== 'exp:' && u.protocol !== 'yamma:') return null;
-      return url;
-    } catch {
+
+    const paymentCols = await this.getPaymentColumnNames();
+    const hasReturnTokenColumn = paymentCols.has('return_token');
+    const hasMetadataColumn = paymentCols.has('metadata');
+
+    let row: { metadata: string | null; order_id: string | null; restaurant_id: string | null } | undefined;
+
+    if (hasReturnTokenColumn) {
+      const res = await this.db.execute(sql`
+        select
+          ${hasMetadataColumn ? sql`p.metadata` : sql`null::text as metadata`},
+          p.order_id::text as order_id,
+          o.restaurant_id::text as restaurant_id
+        from payments p
+        inner join orders o on o.id = p.order_id
+        where lower(p.return_token) = ${t}
+           or (
+             ${hasMetadataColumn ? sql`p.metadata is not null and (p.metadata::jsonb->>'lemonReturnToken') = ${t}` : sql`false`}
+           )
+        order by p.created_at desc
+        limit 1
+      `);
+      row = res.rows[0] as typeof row;
+    } else if (hasMetadataColumn) {
+      const res = await this.db.execute(sql`
+        select
+          p.metadata,
+          p.order_id::text as order_id,
+          o.restaurant_id::text as restaurant_id
+        from payments p
+        inner join orders o on o.id = p.order_id
+        where p.metadata is not null and (p.metadata::jsonb->>'lemonReturnToken') = ${t}
+        order by p.created_at desc
+        limit 1
+      `);
+      row = res.rows[0] as typeof row;
+    }
+
+    if (!row) {
+      this.logger.warn(`payment return token not found token=${t.slice(0, 8)}…`);
       return null;
     }
+
+    const target = this.parseStoredMobileResumeUrl(
+      row.metadata,
+      row.order_id,
+      row.restaurant_id ?? undefined,
+    );
+    if (!target) {
+      this.logger.warn(
+        `payment return token ${t.slice(0, 8)}… matched payment but no resume URL (orderId=${row.order_id ?? 'unknown'})`,
+      );
+    }
+    return target;
   }
 
   /** Credits restaurant owner's fiat balance (card settlements). */
@@ -270,8 +345,8 @@ export class PaymentsService {
     } catch {
       throw new BadRequestException('mobileAppResumeUrl must be a valid URL (from expo-linking).');
     }
-    if (u.protocol !== 'exp:' && u.protocol !== 'yamma:') {
-      throw new BadRequestException('mobileAppResumeUrl must use exp:// (Expo Go) or yamma:// (dev build).');
+    if (u.protocol !== 'exp:' && u.protocol !== 'yamma:' && u.protocol !== 'expo:') {
+      throw new BadRequestException('mobileAppResumeUrl must use exp:// (Expo Go), expo://, or yamma:// (dev build).');
     }
     return t;
   }
@@ -311,6 +386,33 @@ export class PaymentsService {
     const returnToken =
       options?.checkoutSuccessTarget === 'mobile' ? randomBytes(16).toString('hex').toLowerCase() : undefined;
 
+    const metadataPayload =
+      mobileAppResumeUrl != null
+        ? JSON.stringify({
+            mobileResumeUrl: mobileAppResumeUrl,
+            orderId,
+            restaurantId: order.restaurantId,
+            ...(returnToken ? { lemonReturnToken: returnToken } : {}),
+          })
+        : undefined;
+
+    const paymentCols = await this.getPaymentColumnNames();
+    const hasMethodColumn = paymentCols.has('method');
+    const hasReturnTokenColumn = paymentCols.has('return_token');
+    const hasMetadataColumn = paymentCols.has('metadata');
+
+    await this.insertPendingLemonPayment({
+      orderId,
+      amount,
+      currency,
+      returnToken,
+      metadataPayload,
+      paymentCols,
+      hasMethodColumn,
+      hasReturnTokenColumn,
+      hasMetadataColumn,
+    });
+
     let result: Awaited<ReturnType<LemonSqueezeProvider['createPayment']>>;
     try {
       result = await this.lemon.createPayment({
@@ -334,17 +436,54 @@ export class PaymentsService {
       throw new BadRequestException(msg);
     }
 
-    const metadataPayload =
-      mobileAppResumeUrl != null
-        ? JSON.stringify({
-            mobileResumeUrl: mobileAppResumeUrl,
-            ...(returnToken ? { lemonReturnToken: returnToken } : {}),
-          })
-        : undefined;
+    if (returnToken && hasReturnTokenColumn) {
+      await this.db
+        .update(payments)
+        .set({
+          providerPaymentId: result.providerPaymentId,
+          updatedAt: new Date(),
+        })
+        .where(eq(payments.returnToken, returnToken));
+    } else if (returnToken && hasMetadataColumn) {
+      await this.db.execute(sql`
+        update payments
+        set provider_payment_id = ${result.providerPaymentId}, updated_at = now()
+        where metadata is not null and (metadata::jsonb->>'lemonReturnToken') = ${returnToken}
+      `);
+    } else {
+      await this.db
+        .update(payments)
+        .set({
+          providerPaymentId: result.providerPaymentId,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(payments.orderId, orderId), eq(payments.provider, 'lemon_squeeze')));
+    }
 
-    const paymentCols = await this.getPaymentColumnNames();
-    const hasMethodColumn = paymentCols.has('method');
-    const hasReturnTokenColumn = paymentCols.has('return_token');
+    return result;
+  }
+
+  private async insertPendingLemonPayment(args: {
+    orderId: string;
+    amount: number;
+    currency: string;
+    returnToken?: string;
+    metadataPayload?: string;
+    paymentCols: Set<string>;
+    hasMethodColumn: boolean;
+    hasReturnTokenColumn: boolean;
+    hasMetadataColumn: boolean;
+  }) {
+    const {
+      orderId,
+      amount,
+      currency,
+      returnToken,
+      metadataPayload,
+      hasMethodColumn,
+      hasReturnTokenColumn,
+      hasMetadataColumn,
+    } = args;
 
     if (hasMethodColumn || !hasReturnTokenColumn) {
       let methodValue: string | null = null;
@@ -361,8 +500,10 @@ export class PaymentsService {
       const methodVals = hasMethodColumn ? sql`, ${methodValue}` : sql``;
       const returnTokenCols = hasReturnTokenColumn && returnToken ? sql`, "return_token"` : sql``;
       const returnTokenVals = hasReturnTokenColumn && returnToken ? sql`, ${returnToken}` : sql``;
-      const metadataCols = metadataPayload ? sql`, "metadata"` : sql``;
-      const metadataVals = metadataPayload ? sql`, ${metadataPayload}` : sql``;
+      const metadataCols =
+        hasMetadataColumn && metadataPayload ? sql`, "metadata"` : sql``;
+      const metadataVals =
+        hasMetadataColumn && metadataPayload ? sql`, ${metadataPayload}` : sql``;
       await this.db.execute(sql`
         insert into "payments" (
           "order_id",
@@ -377,8 +518,8 @@ export class PaymentsService {
         ) values (
           ${orderId}::uuid,
           ${'lemon_squeeze'},
-          ${result.providerPaymentId},
-          ${result.status},
+          ${null},
+          ${'pending'},
           ${amount.toFixed(2)}::numeric,
           ${currency}
           ${methodVals}
@@ -390,15 +531,14 @@ export class PaymentsService {
       await this.db.insert(payments).values({
         orderId,
         provider: 'lemon_squeeze',
-        providerPaymentId: result.providerPaymentId,
-        status: result.status,
+        providerPaymentId: null,
+        status: 'pending',
         amount: amount.toFixed(2),
         currency,
         ...(returnToken ? { returnToken } : {}),
         ...(metadataPayload ? { metadata: metadataPayload } : {}),
       });
     }
-    return result;
   }
 
   async confirmPayment(orderId: string, status: 'completed' | 'failed') {
