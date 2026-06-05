@@ -97,6 +97,23 @@ export class ConfigService {
     return `${this.frontendUrl}/api/auth/google/callback`;
   }
 
+  /** Expo Go uses https://auth.expo.io/@owner/yamma — not the web callback path. */
+  isAllowedMobileGoogleRedirectUri(redirectUri: string): boolean {
+    let u: URL;
+    try {
+      u = new URL(redirectUri.trim().replace(/\/$/, ''));
+    } catch {
+      return false;
+    }
+    if (u.protocol === 'https:' && u.hostname === 'auth.expo.io') {
+      return /^\/@[^/]+\/yamma$/.test(u.pathname);
+    }
+    if (this.env === 'development' && (u.protocol === 'exp:' || u.protocol === 'yamma:')) {
+      return true;
+    }
+    return false;
+  }
+
   get frontendUrl(): string {
     const v = this.nest.get('FRONTEND_URL', { infer: true })?.trim();
     // Default matches `pnpm dev` for web (next dev -p 3005) so Lemon / OAuth redirects don’t collide with another app on :3000.

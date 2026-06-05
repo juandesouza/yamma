@@ -386,6 +386,51 @@ export class AuthController {
     };
   }
 
+  /** Mobile Expo Go: authorization code + https://auth.expo.io/@owner/yamma redirect (no Android SHA-1). */
+  @Post('google/mobile-code')
+  @HttpCode(HttpStatus.OK)
+  async googleMobileCode(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+    const parsed = googleExchangeSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException(
+        `Invalid request: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
+      );
+    }
+    const data = parsed.data;
+    if (!this.config.isAllowedMobileGoogleRedirectUri(data.redirectUri)) {
+      throw new BadRequestException(
+        'Invalid redirect URI. For Expo Go use https://auth.expo.io/@your-expo-username/yamma and add that exact URI to your Google Cloud **Web** OAuth client.',
+      );
+    }
+    try {
+      const { sessionId, expiresAt } = await this.completeGoogleOAuth(data.code, data.redirectUri);
+      const validated = await this.auth.validateSession(sessionId);
+      if (!validated) {
+        throw new BadRequestException('User not found after Google sign-in');
+      }
+      const user = validated.user;
+      this.setSessionCookie(res, sessionId);
+      return {
+        sessionId,
+        user: { id: user.id, email: user.email ?? undefined, name: user.name, role: user.role },
+        expiresAt,
+      };
+    } catch (e: unknown) {
+      if (e instanceof HttpException || isNestHttpExceptionShape(e)) {
+        throw e;
+      }
+      if (isDatabaseConnectionError(e)) {
+        throw new ServiceUnavailableException(DATABASE_UNAVAILABLE_MESSAGE);
+      }
+      const msg = formatUnknownError(e);
+      throw new BadRequestException(
+        this.config.env === 'development'
+          ? `Google sign-in server error: ${msg.slice(0, 400)}`
+          : 'Google sign-in server error',
+      );
+    }
+  }
+
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() body: unknown, @Req() req: Request) {

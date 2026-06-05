@@ -2,6 +2,7 @@
 module.exports = {
   name: 'Yamma',
   slug: 'yamma',
+  owner: 'juandesouza',
   version: '1.0.0',
   // Expo Go always runs the New Architecture; keep config aligned to avoid bridge mismatches.
   newArchEnabled: true,

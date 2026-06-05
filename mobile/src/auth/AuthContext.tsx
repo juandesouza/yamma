@@ -42,6 +42,7 @@ type AuthContextValue = {
     accountType: 'buyer' | 'seller';
   }) => Promise<{ ok: boolean; message?: string }>;
   signInWithGoogleIdToken: (idToken: string) => Promise<{ ok: boolean; message?: string }>;
+  signInWithGoogleCode: (code: string, redirectUri: string) => Promise<{ ok: boolean; message?: string }>;
   fetchAuthed: (path: string, init?: RequestInit) => Promise<Response>;
 };
 
@@ -196,6 +197,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [signInWithSession],
   );
 
+  const signInWithGoogleCode = useCallback(
+    async (code: string, redirectUri: string) => {
+      const result = await postJson<AuthResponse>('/auth/google/mobile-code', {
+        code,
+        redirectUri,
+      });
+      if (result.networkError || !result.ok) {
+        return { ok: false, message: failMessage('Google sign-in failed', result) };
+      }
+      const { data } = result;
+      if (!data.sessionId || !data.user) {
+        return { ok: false, message: 'Google sign-in did not return a session.' };
+      }
+      await signInWithSession(data.sessionId, data.user);
+      return { ok: true };
+    },
+    [signInWithSession],
+  );
+
   const value = useMemo(
     () => ({
       ready,
@@ -208,6 +228,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       requestPasswordReset,
       registerAccount,
       signInWithGoogleIdToken,
+      signInWithGoogleCode,
       fetchAuthed,
     }),
     [
@@ -221,6 +242,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       requestPasswordReset,
       registerAccount,
       signInWithGoogleIdToken,
+      signInWithGoogleCode,
       fetchAuthed,
     ],
   );
