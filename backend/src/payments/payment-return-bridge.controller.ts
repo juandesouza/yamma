@@ -45,17 +45,26 @@ export class PaymentReturnBridgeController {
   /** Preferred: token maps to full deep link from `Linking.createURL` (works in Expo Go + dev builds). */
   @Get('return/:token')
   async returnToApp(@Param('token') token: string, @Res() res: Response) {
-    const target = await this.payments.getMobileResumeUrlByReturnToken(token);
-    if (!target) {
+    try {
+      const target = await this.payments.getMobileResumeUrlByReturnToken(token);
+      if (!target) {
+        res
+          .status(404)
+          .type('html')
+          .send(
+            '<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body style="background:#0f1014;color:#e5e7eb;font-family:system-ui;padding:24px;text-align:center"><p>Link expired or invalid.</p><p style="opacity:.7;font-size:14px;margin-top:12px">Open Yamma from your home screen and check Profile → Orders.</p></body></html>',
+          );
+        return;
+      }
+      sendResumeHtml(res, target);
+    } catch {
       res
-        .status(404)
+        .status(500)
         .type('html')
         .send(
-          '<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body style="background:#0f1014;color:#e5e7eb;font-family:system-ui;padding:24px;text-align:center"><p>Link expired or invalid.</p><p style="opacity:.7;font-size:14px;margin-top:12px">Open Yamma from your home screen and check Profile → Orders.</p></body></html>',
+          '<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head><body style="background:#0f1014;color:#e5e7eb;font-family:system-ui;padding:24px;text-align:center"><p>Could not open the app.</p><p style="opacity:.7;font-size:14px;margin-top:12px">Open Yamma and check Profile → Orders for your order status.</p></body></html>',
         );
-      return;
     }
-    sendResumeHtml(res, target);
   }
 
   /** Legacy query-string bridge (still supported for old Lemon redirect URLs). */

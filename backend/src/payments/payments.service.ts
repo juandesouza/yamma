@@ -116,32 +116,53 @@ export class PaymentsService {
     return `yamma://payment-return?${q}`;
   }
 
-  private parseStoredMobileResumeUrl(
-    metadataRaw: string | null | undefined,
-    orderId: string | null | undefined,
-    restaurantId?: string,
-  ): string | null {
-    if (metadataRaw?.trim()) {
+  private parseMetadataRecord(metadataRaw: unknown): {
+    mobileResumeUrl?: string;
+    orderId?: string;
+    restaurantId?: string;
+  } | null {
+    if (metadataRaw == null) return null;
+    if (typeof metadataRaw === 'object') {
+      return metadataRaw as {
+        mobileResumeUrl?: string;
+        orderId?: string;
+        restaurantId?: string;
+      };
+    }
+    if (typeof metadataRaw === 'string') {
+      const t = metadataRaw.trim();
+      if (!t) return null;
       try {
-        const m = JSON.parse(metadataRaw) as {
+        return JSON.parse(t) as {
           mobileResumeUrl?: string;
           orderId?: string;
           restaurantId?: string;
         };
-        const url = m.mobileResumeUrl?.trim();
-        if (url) {
-          try {
-            const u = new URL(url);
-            if (this.isAllowedMobileResumeProtocol(u.protocol)) return url;
-          } catch {
-            if (/^(exp|yamma|expo):\/\//i.test(url)) return url;
-          }
-        }
-        const oid = m.orderId?.trim() || orderId?.trim();
-        if (oid) return this.buildMobileResumeFallback(oid, m.restaurantId ?? restaurantId);
       } catch {
-        /* fall through */
+        return null;
       }
+    }
+    return null;
+  }
+
+  private parseStoredMobileResumeUrl(
+    metadataRaw: unknown,
+    orderId: string | null | undefined,
+    restaurantId?: string,
+  ): string | null {
+    const m = this.parseMetadataRecord(metadataRaw);
+    if (m) {
+      const url = m.mobileResumeUrl?.trim();
+      if (url) {
+        try {
+          const u = new URL(url);
+          if (this.isAllowedMobileResumeProtocol(u.protocol)) return url;
+        } catch {
+          if (/^(exp|yamma|expo):\/\//i.test(url)) return url;
+        }
+      }
+      const oid = m.orderId?.trim() || orderId?.trim();
+      if (oid) return this.buildMobileResumeFallback(oid, m.restaurantId ?? restaurantId);
     }
     const oid = orderId?.trim();
     return oid ? this.buildMobileResumeFallback(oid, restaurantId) : null;
@@ -196,8 +217,8 @@ export class PaymentsService {
 
     const target = this.parseStoredMobileResumeUrl(
       row.metadata,
-      row.order_id,
-      row.restaurant_id ?? undefined,
+      row.order_id != null ? String(row.order_id) : null,
+      row.restaurant_id != null ? String(row.restaurant_id) : undefined,
     );
     if (!target) {
       this.logger.warn(
