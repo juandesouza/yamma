@@ -1,17 +1,24 @@
 import * as AuthSession from 'expo-auth-session';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
+import { getApiBaseUrl } from './api';
 
 /**
  * Google **Web** OAuth clients only allow https redirect URIs (not exp://).
- * Expo Go must use: https://auth.expo.io/@owner/slug
  *
- * Set `owner` in app.config.js (or EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI in mobile/.env).
+ * Prefer the Yamma API bridge (`/auth/google/expo-redirect`) — reliable in Expo Go.
+ * The legacy Expo proxy (`auth.expo.io`) often shows "something went wrong" if the
+ * project is not linked on expo.dev.
  */
 export function resolveGoogleOAuthRedirectUri(): string {
   const override = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI?.trim();
   if (override) {
     return override.replace(/\/$/, '');
+  }
+
+  const api = getApiBaseUrl().replace(/\/$/, '');
+  if (api.startsWith('https://')) {
+    return `${api}/auth/google/expo-redirect`;
   }
 
   if (Platform.OS === 'web') {
@@ -22,7 +29,7 @@ export function resolveGoogleOAuthRedirectUri(): string {
     try {
       return AuthSession.getRedirectUrl();
     } catch {
-      // Missing expo.owner — fall through to explicit default below.
+      // Missing expo.owner — fall through.
     }
   }
 

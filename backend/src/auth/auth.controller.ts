@@ -386,7 +386,17 @@ export class AuthController {
     };
   }
 
-  /** Mobile Expo Go: authorization code + https://auth.expo.io/@owner/yamma redirect (no Android SHA-1). */
+  /** Mobile Expo Go: authorization code + https redirect on this API (no auth.expo.io proxy). */
+  @Get('google/expo-redirect')
+  @HttpCode(HttpStatus.OK)
+  googleExpoRedirect(@Res() res: Response) {
+    res
+      .type('html')
+      .send(
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Signed in with Google</p><p style="margin:0;font-size:14px;opacity:.75">Return to the Yamma app to continue.</p></body></html>',
+      );
+  }
+
   @Post('google/mobile-code')
   @HttpCode(HttpStatus.OK)
   async googleMobileCode(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
@@ -399,7 +409,7 @@ export class AuthController {
     const data = parsed.data;
     if (!this.config.isAllowedMobileGoogleRedirectUri(data.redirectUri)) {
       throw new BadRequestException(
-        'Invalid redirect URI. For Expo Go use https://auth.expo.io/@your-expo-username/yamma and add that exact URI to your Google Cloud **Web** OAuth client.',
+        'Invalid redirect URI. Use https://yamma-api.onrender.com/auth/google/expo-redirect (add it in Google Cloud Web client) or set EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI to match.',
       );
     }
     try {

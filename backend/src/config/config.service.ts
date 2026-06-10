@@ -105,6 +105,19 @@ export class ConfigService {
     } catch {
       return false;
     }
+    if (u.pathname === '/auth/google/expo-redirect') {
+      try {
+        const apiOrigin = new URL(this.apiUrl).origin;
+        if (u.origin === apiOrigin) {
+          if (u.protocol === 'https:') return true;
+          if (this.env === 'development' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)) {
+            return true;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     if (u.protocol === 'https:' && u.hostname === 'auth.expo.io') {
       return /^\/@[^/]+\/yamma$/.test(u.pathname);
     }
@@ -112,6 +125,11 @@ export class ConfigService {
       return true;
     }
     return false;
+  }
+
+  /** Public HTTPS redirect for mobile Google OAuth (preferred over auth.expo.io). */
+  get mobileGoogleExpoRedirectUri(): string {
+    return `${this.apiUrl.replace(/\/$/, '')}/auth/google/expo-redirect`;
   }
 
   get frontendUrl(): string {
