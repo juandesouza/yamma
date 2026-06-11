@@ -11,6 +11,7 @@ import { StatusBar } from 'expo-status-bar';
 import { YammaLogo } from '@yamma/design-system';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import type { AuthStackParamList, BuyerStackParamList, SellerStackParamList } from './src/navigation/types';
+import { GoogleOAuthDeepLink } from './src/navigation/GoogleOAuthDeepLink';
 import { PaymentReturnDeepLink } from './src/navigation/PaymentReturnDeepLink';
 import WelcomeScreen from './src/screens/WelcomeScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -162,6 +163,7 @@ export default function App() {
       <SafeAreaProvider>
         <AuthProvider>
           <NavigationContainer ref={buyerNavigationRef} theme={navigationTheme}>
+            <GoogleOAuthDeepLink />
             <PaymentReturnDeepLink navigationRef={buyerNavigationRef} />
             <RootNavigator />
           </NavigationContainer>

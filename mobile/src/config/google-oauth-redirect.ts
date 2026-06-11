@@ -6,9 +6,12 @@ import { getApiBaseUrl } from './api';
 /**
  * Google **Web** OAuth clients only allow https redirect URIs (not exp://).
  *
- * Prefer the Yamma API bridge (`/auth/google/expo-redirect`) — reliable in Expo Go.
- * The legacy Expo proxy (`auth.expo.io`) often shows "something went wrong" if the
- * project is not linked on expo.dev.
+ * Expo Go: use the Yamma API bridge (`/auth/google/expo-redirect`). Google redirects there
+ * with `?code=…`; `openAuthSessionAsync` captures that URL and the app exchanges the code.
+ *
+ * Do **not** use `https://auth.expo.io/...` as redirect_uri unless you go through Expo's
+ * deprecated proxy `/start` flow — opening Google directly with auth.expo.io shows
+ * "something went wrong trying to finish signing in".
  */
 export function resolveGoogleOAuthRedirectUri(): string {
   const override = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI?.trim();
@@ -26,10 +29,15 @@ export function resolveGoogleOAuthRedirectUri(): string {
   }
 
   if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
+    const owner = Constants.expoConfig?.owner;
+    const slug = Constants.expoConfig?.slug;
+    if (owner && slug) {
+      return `https://auth.expo.io/@${owner}/${slug}`;
+    }
     try {
       return AuthSession.getRedirectUrl();
     } catch {
-      // Missing expo.owner — fall through.
+      return 'https://auth.expo.io/@juandesouza/yamma';
     }
   }
 

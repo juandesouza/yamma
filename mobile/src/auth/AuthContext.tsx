@@ -43,6 +43,8 @@ type AuthContextValue = {
   }) => Promise<{ ok: boolean; message?: string }>;
   signInWithGoogleIdToken: (idToken: string) => Promise<{ ok: boolean; message?: string }>;
   signInWithGoogleCode: (code: string, redirectUri: string) => Promise<{ ok: boolean; message?: string }>;
+  /** After API OAuth bridge redirects with `?sessionId=` on `google-oauth` deep link. */
+  signInWithSessionId: (sessionId: string) => Promise<{ ok: boolean; message?: string }>;
   fetchAuthed: (path: string, init?: RequestInit) => Promise<Response>;
 };
 
@@ -216,6 +218,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [signInWithSession],
   );
 
+  const signInWithSessionId = useCallback(
+    async (sid: string) => {
+      try {
+        const res = await fetch(apiUrl('/auth/me'), {
+          method: 'POST',
+          headers: { ...ngrokFetchHeaders(), Authorization: `Bearer ${sid}` },
+        });
+        if (!res.ok) {
+          return { ok: false, message: `Could not load your account (HTTP ${res.status}).` };
+        }
+        const body = (await res.json()) as { user: AuthUser };
+        if (!body.user) {
+          return { ok: false, message: 'Server did not return a user profile.' };
+        }
+        await signInWithSession(sid, body.user);
+        return { ok: true };
+      } catch {
+        return { ok: false, message: 'Network error while finishing Google sign-in.' };
+      }
+    },
+    [signInWithSession],
+  );
+
   const value = useMemo(
     () => ({
       ready,
@@ -229,6 +254,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       registerAccount,
       signInWithGoogleIdToken,
       signInWithGoogleCode,
+      signInWithSessionId,
       fetchAuthed,
     }),
     [
@@ -243,6 +269,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       registerAccount,
       signInWithGoogleIdToken,
       signInWithGoogleCode,
+      signInWithSessionId,
       fetchAuthed,
     ],
   );
