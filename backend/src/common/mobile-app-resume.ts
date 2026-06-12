@@ -46,7 +46,11 @@ function escapeHtmlAttr(s: string): string {
 export function sendResumeHtml(res: Response, target: string) {
   const href = escapeHtmlAttr(target);
   const js = JSON.stringify(target);
-  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta http-equiv="refresh" content="0;url=${href}"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Opening Yamma…</p><p style="margin:0;font-size:14px;opacity:.75">If nothing happens, tap below.</p><p style="margin-top:20px"><a href="${href}" style="color:#ff9a66;font-weight:600;font-size:16px">Open in app</a></p><script>try{location.replace(${js});}catch(e){}</script></body></html>`;
+  const openScript =
+    target.startsWith('exp://') || target.startsWith('expo://')
+      ? `(function(){var t=${js};function go(u){try{location.replace(u);}catch(e){}}if(/Android/i.test(navigator.userAgent)){var p=t.replace(/^(exp|expo):\\/\\//,'');go('intent://'+p+'#Intent;scheme=exp;package=host.exp.exponent;end');setTimeout(function(){go(t);},600);}else{go(t);}})();`
+      : `try{location.replace(${js});}catch(e){}`;
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Opening Yamma…</p><p style="margin:0;font-size:14px;opacity:.75">If nothing happens, tap below.</p><p style="margin-top:20px"><a href="${href}" style="color:#ff9a66;font-weight:600;font-size:16px">Open in app</a></p><script>${openScript}</script></body></html>`;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.status(200).send(html);

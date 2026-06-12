@@ -28,9 +28,11 @@ import { z } from 'zod';
 import { isGuestUserEmail } from './guest.constants';
 import { DATABASE_UNAVAILABLE_MESSAGE, isDatabaseConnectionError } from '../common/db-errors';
 import {
-  buildGoogleOAuthCallbackResultUrl,
-  sendGoogleOAuthBridgeHtml,
-} from '../common/google-oauth-bridge';
+  appendQueryToUrl,
+  defaultGoogleOAuthResumeUrl,
+  parseResumeUrlFromOAuthState,
+  sendResumeHtml,
+} from '../common/mobile-app-resume';
 import { sign, verify } from 'jsonwebtoken';
 import * as nodemailer from 'nodemailer';
 
@@ -392,42 +394,57 @@ export class AuthController {
   }
 
   /**
-   * Mobile Google OAuth redirect target (registered in Google Cloud).
-   * Does not exchange the code — the app receives `?code=` via openAuthSessionAsync and POSTs
-   * /auth/google/mobile-code. Never redirect to exp:// (causes Custom Tab loops on Android).
+   * Mobile Google OAuth bridge: exchange the code, then open Expo Go via exp:// (same pattern as
+   * Lemon payment return). Android Custom Tabs do not auto-dismiss on bare HTTPS alone.
    */
   @Get('google/expo-redirect')
   @HttpCode(HttpStatus.OK)
-  googleExpoRedirect(
+  async googleExpoRedirect(
     @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
     @Query('error') oauthError: string | undefined,
     @Query('error_description') errorDescription: string | undefined,
     @Res() res: Response,
   ) {
     const redirectUri = this.config.mobileGoogleExpoRedirectUri;
+    const resumeBase =
+      parseResumeUrlFromOAuthState(state) ?? defaultGoogleOAuthResumeUrl();
 
     const err =
       oauthError?.trim() ||
       (errorDescription?.trim() ? errorDescription.trim().slice(0, 120) : undefined);
     if (err) {
-      return res.redirect(
-        302,
-        buildGoogleOAuthCallbackResultUrl(redirectUri, { error: err }),
-      );
-    }
-
-    if (code?.trim()) {
-      sendGoogleOAuthBridgeHtml(res);
+      sendResumeHtml(res, appendQueryToUrl(resumeBase, { error: err }));
       return;
     }
 
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res
-      .status(400)
-      .type('html')
-      .send(
-        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Missing Google sign-in code</p><p style="margin:0;font-size:14px;opacity:.75">Close this tab and try again from the Yamma app.</p></body></html>',
-      );
+    if (!code?.trim()) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res
+        .status(400)
+        .type('html')
+        .send(
+          '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Missing Google sign-in code</p><p style="margin:0;font-size:14px;opacity:.75">Close this tab and try again from the Yamma app.</p></body></html>',
+        );
+      return;
+    }
+
+    try {
+      const { sessionId } = await this.completeGoogleOAuth(code.trim(), redirectUri);
+      const validated = await this.auth.validateSession(sessionId);
+      if (!validated) {
+        sendResumeHtml(res, appendQueryToUrl(resumeBase, { error: 'session_failed' }));
+        return;
+      }
+      sendResumeHtml(res, appendQueryToUrl(resumeBase, { sessionId }));
+    } catch (e: unknown) {
+      const msg =
+        e instanceof BadRequestException
+          ? String(e.message).slice(0, 120)
+          : 'exchange_failed';
+      console.error('[google/expo-redirect]', msg, e);
+      sendResumeHtml(res, appendQueryToUrl(resumeBase, { error: msg }));
+    }
   }
 
   @Post('google/mobile-code')
