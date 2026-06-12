@@ -3,7 +3,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import { getApiBaseUrl } from './api';
 
-/** Registered in Google Cloud — Google redirects here with `?code=`. */
+/** Registered in Google Cloud — Google + openAuthSessionAsync both use this URL. */
 export function resolveGoogleOAuthRedirectUri(): string {
   const override = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI?.trim();
   if (override) {
@@ -37,15 +37,6 @@ export function resolveGoogleOAuthRedirectUri(): string {
     path: 'oauthredirect',
     native: 'yamma:/oauthredirect',
   });
-}
-
-/**
- * openAuthSessionAsync listens for this URL (server 302 after code exchange).
- * Not registered in Google Cloud — only our API redirects here.
- */
-export function resolveGoogleOAuthSessionDoneUri(): string {
-  const api = getApiBaseUrl().replace(/\/$/, '');
-  return `${api}/auth/google/mobile-done`;
 }
 
 export function getGoogleOAuthRedirectPreview(): string {

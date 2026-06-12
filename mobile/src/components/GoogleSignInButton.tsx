@@ -15,11 +15,24 @@ import { resolveGoogleClientIds } from '../config/google-oauth-config';
 import {
   getGoogleOAuthRedirectPreview,
   resolveGoogleOAuthRedirectUri,
-  resolveGoogleOAuthSessionDoneUri,
 } from '../config/google-oauth-redirect';
-import { parseGoogleOAuthSessionDoneUrl } from '../navigation/googleOAuthDeepLink';
+import {
+  parseGoogleOAuthCodeFromUrl,
+  parseGoogleOAuthErrorFromUrl,
+} from '../navigation/googleOAuthDeepLink';
 
 WebBrowser.maybeCompleteAuthSession();
+
+async function safeDismissBrowser(): Promise<void> {
+  try {
+    const result = WebBrowser.dismissBrowser();
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      await result;
+    }
+  } catch {
+    /* unavailable in Expo Go on some platforms */
+  }
+}
 
 type Props = {
   disabled?: boolean;
@@ -27,12 +40,11 @@ type Props = {
 };
 
 export default function GoogleSignInButton({ disabled, variant = 'login' }: Props) {
-  const { signInWithSessionId } = useAuth();
+  const { signInWithGoogleCode } = useAuth();
   const [busy, setBusy] = useState(false);
 
   const clientIds = useMemo(() => resolveGoogleClientIds(), []);
   const redirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
-  const sessionDoneUri = useMemo(() => resolveGoogleOAuthSessionDoneUri(), []);
 
   const [request] = Google.useAuthRequest(
     clientIds
@@ -52,12 +64,12 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
         },
   );
 
-  const finishSession = useCallback(
-    async (sessionId: string) => {
+  const finishWithCode = useCallback(
+    async (code: string) => {
       setBusy(true);
       try {
-        await WebBrowser.dismissBrowser().catch(() => {});
-        const { ok, message } = await signInWithSessionId(sessionId);
+        await safeDismissBrowser();
+        const { ok, message } = await signInWithGoogleCode(code, redirectUri);
         if (!ok) {
           Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
         }
@@ -65,7 +77,7 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
         setBusy(false);
       }
     },
-    [signInWithSessionId],
+    [redirectUri, signInWithGoogleCode],
   );
 
   const configured = Boolean(clientIds);
@@ -86,12 +98,16 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
       const authUrl =
         request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
       await WebBrowser.warmUpAsync();
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, sessionDoneUri, {
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri, {
         showInRecents: true,
         ...(Platform.OS === 'android' ? { createTask: false } : {}),
       });
-      await WebBrowser.dismissBrowser().catch(() => {});
-      await WebBrowser.coolDownAsync().catch(() => {});
+      await safeDismissBrowser();
+      try {
+        await WebBrowser.coolDownAsync();
+      } catch {
+        /* optional */
+      }
 
       if (result.type === 'cancel' || result.type === 'dismiss') return;
 
@@ -100,19 +116,21 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
         return;
       }
 
-      const parsed = parseGoogleOAuthSessionDoneUrl(result.url);
-      if (parsed?.sessionId) {
-        await finishSession(parsed.sessionId);
+      const oauthError = parseGoogleOAuthErrorFromUrl(result.url);
+      if (oauthError) {
+        Alert.alert('Google sign-in failed', oauthError);
         return;
       }
-      if (parsed?.error) {
-        Alert.alert('Google sign-in failed', parsed.error);
+
+      const code = parseGoogleOAuthCodeFromUrl(result.url);
+      if (code) {
+        await finishWithCode(code);
         return;
       }
 
       Alert.alert(
         'Google sign-in incomplete',
-        `Expected to return to:\n${sessionDoneUri}\n\nAdd the expo-redirect URI in Google Cloud if you have not already.`,
+        `No authorization code received. Confirm this redirect URI in Google Cloud (Web client):\n${getGoogleOAuthRedirectPreview()}`,
       );
     } catch (e) {
       Alert.alert(

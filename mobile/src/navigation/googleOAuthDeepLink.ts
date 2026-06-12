@@ -1,22 +1,28 @@
-/** Parse the mobile OAuth completion URL returned by openAuthSessionAsync. */
-export type GoogleOAuthSessionDone = {
-  sessionId?: string;
-  error?: string;
-};
+const EXPO_REDIRECT_PATH = '/auth/google/expo-redirect';
 
-const SESSION_DONE_PATH = '/auth/google/mobile-done';
-
-export function parseGoogleOAuthSessionDoneUrl(url: string): GoogleOAuthSessionDone | null {
+/** Authorization code from Google redirect (openAuthSessionAsync result URL). */
+export function parseGoogleOAuthCodeFromUrl(url: string): string | null {
   if (!url?.trim()) return null;
   try {
     const u = new URL(url);
-    if (!u.pathname.replace(/\/$/, '').endsWith(SESSION_DONE_PATH)) return null;
-
-    const sessionId = u.searchParams.get('sessionId')?.trim() ?? '';
-    const error = u.searchParams.get('error')?.trim() ?? '';
-    if (sessionId) return { sessionId };
-    if (error) return { error };
+    if (!u.pathname.replace(/\/$/, '').endsWith(EXPO_REDIRECT_PATH)) return null;
+    const code = u.searchParams.get('code')?.trim() ?? '';
+    return code || null;
+  } catch {
     return null;
+  }
+}
+
+export function parseGoogleOAuthErrorFromUrl(url: string): string | null {
+  if (!url?.trim()) return null;
+  try {
+    const u = new URL(url);
+    if (!u.pathname.replace(/\/$/, '').endsWith(EXPO_REDIRECT_PATH)) return null;
+    const error =
+      u.searchParams.get('error_description')?.trim() ||
+      u.searchParams.get('error')?.trim() ||
+      '';
+    return error || null;
   } catch {
     return null;
   }

@@ -27,7 +27,6 @@ import type { SessionUser } from './auth.types';
 import { z } from 'zod';
 import { isGuestUserEmail } from './guest.constants';
 import { DATABASE_UNAVAILABLE_MESSAGE, isDatabaseConnectionError } from '../common/db-errors';
-import { buildGoogleOAuthMobileDoneUrl, sendGoogleOAuthCompleteHtml } from '../common/google-oauth-bridge';
 import { sign, verify } from 'jsonwebtoken';
 import * as nodemailer from 'nodemailer';
 
@@ -389,78 +388,18 @@ export class AuthController {
   }
 
   /**
-   * Google OAuth redirect (registered in Google Cloud). Exchanges the code and 302s to
-   * /auth/google/mobile-done — openAuthSessionAsync listens on that path, not here (avoids loops).
+   * Google OAuth redirect (registered in Google Cloud). Serves static HTML only — the mobile app
+   * captures `?code=` via openAuthSessionAsync and exchanges via POST /auth/google/mobile-code.
    */
   @Get('google/expo-redirect')
-  async googleExpoRedirect(
-    @Query('code') code: string | undefined,
-    @Query('error') oauthError: string | undefined,
-    @Query('error_description') errorDescription: string | undefined,
-    @Res() res: Response,
-  ) {
-    const apiUrl = this.config.apiUrl.replace(/\/$/, '');
-    const redirectUri = this.config.mobileGoogleExpoRedirectUri;
-
-    const err =
-      oauthError?.trim() ||
-      (errorDescription?.trim() ? errorDescription.trim().slice(0, 120) : undefined);
-    if (err) {
-      return res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiUrl, { error: err }));
-    }
-
-    if (!code?.trim()) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-      return res
-        .status(400)
-        .type('html')
-        .send(
-          '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Missing Google sign-in code</p><p style="margin:0;font-size:14px;opacity:.75">Close this tab and try again from the Yamma app.</p></body></html>',
-        );
-    }
-
-    try {
-      const { sessionId } = await this.completeGoogleOAuth(code.trim(), redirectUri);
-      const validated = await this.auth.validateSession(sessionId);
-      if (!validated) {
-        return res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiUrl, { error: 'session_failed' }));
-      }
-      return res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiUrl, { sessionId }));
-    } catch (e: unknown) {
-      const msg =
-        e instanceof BadRequestException
-          ? String(e.message).slice(0, 120)
-          : 'exchange_failed';
-      console.error('[google/expo-redirect]', msg, e);
-      return res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiUrl, { error: msg }));
-    }
-  }
-
-  /** Completion URL for openAuthSessionAsync (server redirect target, not Google redirect_uri). */
-  @Get('google/mobile-done')
   @HttpCode(HttpStatus.OK)
-  googleMobileDone(
-    @Query('sessionId') sessionId: string | undefined,
-    @Query('error') error: string | undefined,
-    @Res() res: Response,
-  ) {
-    if (error?.trim()) {
-      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-      return res
-        .status(200)
-        .type('html')
-        .send(
-          `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Sign-in failed</p><p style="margin:0;font-size:14px;opacity:.85">${error.trim().slice(0, 200).replace(/</g, '')}</p></body></html>`,
-        );
-    }
-    if (sessionId?.trim()) {
-      sendGoogleOAuthCompleteHtml(res);
-      return;
-    }
+  googleExpoRedirect(@Res() res: Response) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-    return res.status(400).type('html').send(
-      '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Invalid sign-in response</p></body></html>',
-    );
+    res
+      .type('html')
+      .send(
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Signed in with Google</p><p style="margin:0;font-size:14px;opacity:.75">Returning to Yamma…</p><script>try{window.close();}catch(e){}</script></body></html>',
+      );
   }
 
   @Post('google/mobile-code')
