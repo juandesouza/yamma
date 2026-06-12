@@ -27,6 +27,7 @@ import type { SessionUser } from './auth.types';
 import { z } from 'zod';
 import { isGuestUserEmail } from './guest.constants';
 import { DATABASE_UNAVAILABLE_MESSAGE, isDatabaseConnectionError } from '../common/db-errors';
+import { resolveGoogleOAuthAppReturnTarget, sendAppResumeHtml } from '../common/google-oauth-bridge';
 import { sign, verify } from 'jsonwebtoken';
 import * as nodemailer from 'nodemailer';
 
@@ -388,18 +389,18 @@ export class AuthController {
   }
 
   /**
-   * Google OAuth redirect (registered in Google Cloud). Serves static HTML only — the mobile app
-   * captures `?code=` via openAuthSessionAsync and exchanges via POST /auth/google/mobile-code.
+   * Google OAuth redirect (registered in Google Cloud). Opens the app via exp:// or yamma:// so
+   * openAuthSessionAsync can dismiss; the app exchanges `?code=` via POST /auth/google/mobile-code.
    */
   @Get('google/expo-redirect')
   @HttpCode(HttpStatus.OK)
-  googleExpoRedirect(@Res() res: Response) {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res
-      .type('html')
-      .send(
-        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Signed in with Google</p><p style="margin:0;font-size:14px;opacity:.75">Returning to Yamma…</p><script>try{window.close();}catch(e){}</script></body></html>',
-      );
+  googleExpoRedirect(
+    @Query() query: Record<string, string | string[] | undefined>,
+    @Res() res: Response,
+  ) {
+    const state = Array.isArray(query.state) ? query.state[0] : query.state;
+    const target = resolveGoogleOAuthAppReturnTarget(state, query);
+    sendAppResumeHtml(res, target);
   }
 
   @Post('google/mobile-code')

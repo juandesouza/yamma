@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "sync-ngrok-env": "node scripts/sync-ngrok-env.cjs",
-    "start": "expo start",
+    "start": "expo start --lan",
+    "start:go": "expo start --lan --go -c --port 8082",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",

@@ -1,9 +1,10 @@
 import * as AuthSession from 'expo-auth-session';
+import * as Linking from 'expo-linking';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import { getApiBaseUrl } from './api';
 
-/** Registered in Google Cloud — Google + openAuthSessionAsync both use this URL. */
+/** Google Cloud redirect URI (HTTPS). The API bridge then opens the app via `appReturnUri`. */
 export function resolveGoogleOAuthRedirectUri(): string {
   const override = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI?.trim();
   if (override) {
@@ -37,6 +38,19 @@ export function resolveGoogleOAuthRedirectUri(): string {
     path: 'oauthredirect',
     native: 'yamma:/oauthredirect',
   });
+}
+
+/** Deep link `openAuthSessionAsync` waits for after the HTTPS bridge (Expo Go → exp://, builds → yamma://). */
+export function resolveGoogleOAuthAppReturnUri(): string {
+  try {
+    return Linking.createURL('oauthredirect');
+  } catch {
+    return AuthSession.makeRedirectUri({
+      scheme: 'yamma',
+      path: 'oauthredirect',
+      native: 'yamma://oauthredirect',
+    });
+  }
 }
 
 export function getGoogleOAuthRedirectPreview(): string {

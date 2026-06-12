@@ -14,8 +14,10 @@ import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds } from '../config/google-oauth-config';
 import {
   getGoogleOAuthRedirectPreview,
+  resolveGoogleOAuthAppReturnUri,
   resolveGoogleOAuthRedirectUri,
 } from '../config/google-oauth-redirect';
+import { withGoogleMobileOAuthState } from '../config/google-oauth-state';
 import {
   parseGoogleOAuthCodeFromUrl,
   parseGoogleOAuthErrorFromUrl,
@@ -44,7 +46,8 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
   const [busy, setBusy] = useState(false);
 
   const clientIds = useMemo(() => resolveGoogleClientIds(), []);
-  const redirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
+  const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
+  const appReturnUri = useMemo(() => resolveGoogleOAuthAppReturnUri(), []);
 
   const [request] = Google.useAuthRequest(
     clientIds
@@ -52,14 +55,14 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
           webClientId: clientIds.webClientId,
           androidClientId: clientIds.androidClientId,
           iosClientId: clientIds.iosClientId,
-          redirectUri,
+          redirectUri: googleRedirectUri,
           usePKCE: false,
           selectAccount: true,
           shouldAutoExchangeCode: false,
         }
       : {
           webClientId: 'missing',
-          redirectUri,
+          redirectUri: googleRedirectUri,
           usePKCE: false,
         },
   );
@@ -69,7 +72,7 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
       setBusy(true);
       try {
         await safeDismissBrowser();
-        const { ok, message } = await signInWithGoogleCode(code, redirectUri);
+        const { ok, message } = await signInWithGoogleCode(code, googleRedirectUri);
         if (!ok) {
           Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
         }
@@ -77,7 +80,7 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
         setBusy(false);
       }
     },
-    [redirectUri, signInWithGoogleCode],
+    [googleRedirectUri, signInWithGoogleCode],
   );
 
   const configured = Boolean(clientIds);
@@ -95,10 +98,11 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
 
     setBusy(true);
     try {
-      const authUrl =
+      const rawAuthUrl =
         request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
+      const authUrl = withGoogleMobileOAuthState(rawAuthUrl, appReturnUri);
       await WebBrowser.warmUpAsync();
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri, {
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, appReturnUri, {
         showInRecents: true,
         ...(Platform.OS === 'android' ? { createTask: false } : {}),
       });
