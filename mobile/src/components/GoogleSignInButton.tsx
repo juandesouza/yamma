@@ -1,8 +1,7 @@
 import * as Google from 'expo-auth-session/providers/google';
 import type { AuthSessionResult } from 'expo-auth-session';
-import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,79 +14,55 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds } from '../config/google-oauth-config';
 import { getGoogleOAuthRedirectPreview, resolveGoogleOAuthRedirectUri } from '../config/google-oauth-redirect';
-import {
-  buildGoogleOAuthResumeUrl,
-  buildGoogleOAuthState,
-  parseGoogleOAuthReturnUrl,
-} from '../navigation/googleOAuthDeepLink';
+import { readGoogleOAuthReturnFromAuthUrl } from '../navigation/googleOAuthDeepLink';
 
 WebBrowser.maybeCompleteAuthSession();
 
 type Props = {
   disabled?: boolean;
-  /** "Sign in" vs "Sign up" label only */
   variant?: 'login' | 'register';
 };
 
-function readGoogleAuthCode(response: AuthSessionResult | null): string | null {
-  if (response?.type !== 'success' || !('params' in response)) return null;
-  const code = response.params.code;
-  return typeof code === 'string' && code.length > 0 ? code : null;
+function readResultFromAuthSession(result: AuthSessionResult | null) {
+  if (result?.type !== 'success' || !('url' in result) || typeof result.url !== 'string') {
+    return null;
+  }
+  return readGoogleOAuthReturnFromAuthUrl(result.url);
 }
 
 export default function GoogleSignInButton({ disabled, variant = 'login' }: Props) {
-  const { signInWithGoogleCode, signInWithSessionId } = useAuth();
+  const { signInWithGoogleCode } = useAuth();
   const [busy, setBusy] = useState(false);
   const handledRef = useRef(false);
 
   const clientIds = useMemo(() => resolveGoogleClientIds(), []);
   const redirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
-  const resumeUrl = useMemo(() => buildGoogleOAuthResumeUrl(), []);
-  const oauthState = useMemo(() => buildGoogleOAuthState(resumeUrl), [resumeUrl]);
 
-  const [request, response, promptAsync] = Google.useAuthRequest(
+  const [request, , promptAsync] = Google.useAuthRequest(
     clientIds
       ? {
           webClientId: clientIds.webClientId,
           androidClientId: clientIds.androidClientId,
           iosClientId: clientIds.iosClientId,
           redirectUri,
-          state: oauthState,
-          usePKCE: false,
           selectAccount: true,
+          usePKCE: false,
           shouldAutoExchangeCode: false,
         }
       : {
           webClientId: 'missing',
           redirectUri,
-          state: oauthState,
           usePKCE: false,
         },
   );
 
-  const finishSession = useCallback(
-    async (sessionId: string) => {
-      if (handledRef.current) return;
-      handledRef.current = true;
-      setBusy(true);
-      try {
-        const { ok, message } = await signInWithSessionId(sessionId);
-        if (!ok) {
-          Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
-        }
-      } finally {
-        setBusy(false);
-      }
-    },
-    [signInWithSessionId],
-  );
-
-  const handleCode = useCallback(
+  const finishWithCode = useCallback(
     async (code: string) => {
       if (handledRef.current) return;
       handledRef.current = true;
       setBusy(true);
       try {
+        await WebBrowser.dismissBrowser().catch(() => {});
         const { ok, message } = await signInWithGoogleCode(code, redirectUri);
         if (!ok) {
           Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
@@ -98,29 +73,6 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
     },
     [redirectUri, signInWithGoogleCode],
   );
-
-  useEffect(() => {
-    const code = readGoogleAuthCode(response ?? null);
-    if (code) {
-      void handleCode(code);
-      return;
-    }
-    if (response?.type === 'error') {
-      const raw =
-        response.error?.message ??
-        (typeof response.params?.error_description === 'string'
-          ? response.params.error_description
-          : typeof response.params?.error === 'string'
-            ? response.params.error
-            : 'Try again.');
-      const isRedirectMismatch = /redirect_uri_mismatch/i.test(raw);
-      const redirect = getGoogleOAuthRedirectPreview();
-      const hint = isRedirectMismatch
-        ? `Google Cloud → Credentials → your **Web** OAuth client → Authorized redirect URIs must include exactly:\n${redirect}\n\n(Use the API URL above — not auth.expo.io — for Expo Go.)`
-        : `Confirm that URI is in Google Cloud and restart Expo with: npx expo start --go -c\n\nRedirect URI: ${redirect}`;
-      Alert.alert('Google sign-in failed', `${raw}\n\n${hint}`);
-    }
-  }, [response, handleCode]);
 
   const configured = Boolean(clientIds);
   const waitingForGoogleRequest = configured && !request;
@@ -138,44 +90,51 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
     handledRef.current = false;
     setBusy(true);
 
-    const linkSub = Linking.addEventListener('url', ({ url }) => {
-      const parsed = parseGoogleOAuthReturnUrl(url);
-      if (!parsed) return;
-      linkSub.remove();
-      void WebBrowser.coolDownAsync().catch(() => {});
-      if (parsed.sessionId) {
-        void finishSession(parsed.sessionId);
-        return;
-      }
-      if (parsed.error) {
-        handledRef.current = true;
-        setBusy(false);
-        Alert.alert('Google sign-in failed', parsed.error);
-      }
-    });
-
     try {
       await WebBrowser.warmUpAsync();
       const r = await promptAsync({
         showInRecents: true,
         ...(Platform.OS === 'android' ? { createTask: false } : {}),
       });
-      void WebBrowser.coolDownAsync().catch(() => {});
+      await WebBrowser.dismissBrowser().catch(() => {});
+      await WebBrowser.coolDownAsync().catch(() => {});
 
       if (r?.type === 'cancel' || r?.type === 'dismiss') return;
 
-      const parsed = parseGoogleOAuthReturnUrl(r?.type === 'success' && 'url' in r ? r.url : '');
-      if (parsed?.sessionId) {
-        await finishSession(parsed.sessionId);
+      if (r?.type === 'error') {
+        const raw =
+          r.error?.message ??
+          (typeof r.params?.error_description === 'string'
+            ? r.params.error_description
+            : typeof r.params?.error === 'string'
+              ? r.params.error
+              : 'Try again.');
+        const isRedirectMismatch = /redirect_uri_mismatch/i.test(raw);
+        const redirect = getGoogleOAuthRedirectPreview();
+        Alert.alert(
+          'Google sign-in failed',
+          isRedirectMismatch
+            ? `${raw}\n\nAdd this redirect URI in Google Cloud (Web client):\n${redirect}`
+            : `${raw}\n\nRedirect URI: ${redirect}`,
+        );
         return;
       }
 
-      const code = readGoogleAuthCode(r);
-      if (code) {
-        await handleCode(code);
+      const parsed = readResultFromAuthSession(r);
+      if (parsed?.error) {
+        Alert.alert('Google sign-in failed', parsed.error);
+        return;
       }
+      if (parsed?.code) {
+        await finishWithCode(parsed.code);
+        return;
+      }
+
+      Alert.alert(
+        'Google sign-in incomplete',
+        'The browser closed before Yamma received a sign-in code. Try again.',
+      );
     } finally {
-      linkSub.remove();
       if (!handledRef.current) {
         setBusy(false);
       }
