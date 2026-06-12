@@ -23,3 +23,10 @@ export function buildGoogleOAuthCallbackResultUrl(
   const q = new URLSearchParams(params).toString();
   return q ? `${base}?${q}` : base;
 }
+
+/** HTTPS URL openAuthSessionAsync waits for (not registered in Google Cloud). */
+export function buildGoogleOAuthMobileDoneUrl(apiUrl: string, params: Record<string, string>): string {
+  const base = `${apiUrl.replace(/\/$/, '')}/auth/google/mobile-done`;
+  const q = new URLSearchParams(params).toString();
+  return q ? `${base}?${q}` : base;
+}

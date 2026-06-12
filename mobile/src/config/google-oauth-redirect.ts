@@ -3,16 +3,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import { getApiBaseUrl } from './api';
 
-/**
- * Google **Web** OAuth clients only allow https redirect URIs (not exp://).
- *
- * Expo Go: use the Yamma API bridge (`/auth/google/expo-redirect`). Google redirects there
- * with `?code=…`; `openAuthSessionAsync` captures that URL and the app exchanges the code.
- *
- * Do **not** use `https://auth.expo.io/...` as redirect_uri unless you go through Expo's
- * deprecated proxy `/start` flow — opening Google directly with auth.expo.io shows
- * "something went wrong trying to finish signing in".
- */
+/** Registered in Google Cloud — Google redirects here with `?code=`. */
 export function resolveGoogleOAuthRedirectUri(): string {
   const override = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI?.trim();
   if (override) {
@@ -48,7 +39,15 @@ export function resolveGoogleOAuthRedirectUri(): string {
   });
 }
 
-/** Shown in alerts when Google returns OAuth errors — paste into Google Cloud Console. */
+/**
+ * openAuthSessionAsync listens for this URL (server 302 after code exchange).
+ * Not registered in Google Cloud — only our API redirects here.
+ */
+export function resolveGoogleOAuthSessionDoneUri(): string {
+  const api = getApiBaseUrl().replace(/\/$/, '');
+  return `${api}/auth/google/mobile-done`;
+}
+
 export function getGoogleOAuthRedirectPreview(): string {
   return resolveGoogleOAuthRedirectUri();
 }
