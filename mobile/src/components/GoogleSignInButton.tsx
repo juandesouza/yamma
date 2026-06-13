@@ -10,17 +10,17 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { wakeApiHealth } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds } from '../config/google-oauth-config';
 import {
   getGoogleOAuthRedirectPreview,
-  resolveGoogleOAuthAppReturnUri,
+  resolveGoogleOAuthMobileDoneUri,
   resolveGoogleOAuthRedirectUri,
 } from '../config/google-oauth-redirect';
-import { withGoogleMobileOAuthState } from '../config/google-oauth-state';
 import {
-  parseGoogleOAuthCodeFromUrl,
   parseGoogleOAuthErrorFromUrl,
+  parseGoogleOAuthSessionIdFromUrl,
 } from '../navigation/googleOAuthDeepLink';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -42,12 +42,12 @@ type Props = {
 };
 
 export default function GoogleSignInButton({ disabled, variant = 'login' }: Props) {
-  const { signInWithGoogleCode } = useAuth();
+  const { signInWithSessionId } = useAuth();
   const [busy, setBusy] = useState(false);
 
   const clientIds = useMemo(() => resolveGoogleClientIds(), []);
   const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
-  const appReturnUri = useMemo(() => resolveGoogleOAuthAppReturnUri(), []);
+  const authSessionReturnUri = useMemo(() => resolveGoogleOAuthMobileDoneUri(), []);
 
   const [request] = Google.useAuthRequest(
     clientIds
@@ -57,7 +57,7 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
           iosClientId: clientIds.iosClientId,
           redirectUri: googleRedirectUri,
           usePKCE: false,
-          selectAccount: true,
+          selectAccount: false,
           shouldAutoExchangeCode: false,
         }
       : {
@@ -67,12 +67,12 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
         },
   );
 
-  const finishWithCode = useCallback(
-    async (code: string) => {
+  const finishWithSession = useCallback(
+    async (sessionId: string) => {
       setBusy(true);
       try {
         await safeDismissBrowser();
-        const { ok, message } = await signInWithGoogleCode(code, googleRedirectUri);
+        const { ok, message } = await signInWithSessionId(sessionId);
         if (!ok) {
           Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
         }
@@ -80,7 +80,7 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
         setBusy(false);
       }
     },
-    [googleRedirectUri, signInWithGoogleCode],
+    [signInWithSessionId],
   );
 
   const configured = Boolean(clientIds);
@@ -98,11 +98,18 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
 
     setBusy(true);
     try {
-      const rawAuthUrl =
-        request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
-      const authUrl = withGoogleMobileOAuthState(rawAuthUrl, appReturnUri);
+      const apiReady = await wakeApiHealth();
+      if (!apiReady) {
+        Alert.alert(
+          'API unreachable',
+          'Could not reach the Yamma API. Wait a moment (Render may be waking up) and try again.',
+        );
+        return;
+      }
+
+      const authUrl = request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
       await WebBrowser.warmUpAsync();
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, appReturnUri, {
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, authSessionReturnUri, {
         showInRecents: true,
         ...(Platform.OS === 'android' ? { createTask: false } : {}),
       });
@@ -126,15 +133,15 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
         return;
       }
 
-      const code = parseGoogleOAuthCodeFromUrl(result.url);
-      if (code) {
-        await finishWithCode(code);
+      const sessionId = parseGoogleOAuthSessionIdFromUrl(result.url);
+      if (sessionId) {
+        await finishWithSession(sessionId);
         return;
       }
 
       Alert.alert(
         'Google sign-in incomplete',
-        `No authorization code received. Confirm this redirect URI in Google Cloud (Web client):\n${getGoogleOAuthRedirectPreview()}`,
+        `No session received. Confirm this redirect URI in Google Cloud (Web client):\n${getGoogleOAuthRedirectPreview()}`,
       );
     } catch (e) {
       Alert.alert(

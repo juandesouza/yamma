@@ -3,10 +3,9 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { Alert } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useAuth } from '../auth/AuthContext';
-import { resolveGoogleOAuthRedirectUri } from '../config/google-oauth-redirect';
 import {
-  parseGoogleOAuthCodeFromUrl,
   parseGoogleOAuthErrorFromUrl,
+  parseGoogleOAuthSessionIdFromUrl,
 } from './googleOAuthDeepLink';
 
 async function safeDismissBrowser(): Promise<void> {
@@ -20,11 +19,10 @@ async function safeDismissBrowser(): Promise<void> {
   }
 }
 
-/** Fallback when the HTTPS bridge opens exp:// / yamma:// outside openAuthSessionAsync. */
+/** Fallback when openAuthSessionAsync does not capture the mobile-done URL. */
 export function GoogleOAuthDeepLink() {
-  const { user, signInWithGoogleCode } = useAuth();
-  const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
-  const lastCode = useRef<string | null>(null);
+  const { user, signInWithSessionId } = useAuth();
+  const lastSessionId = useRef<string | null>(null);
 
   useEffect(() => {
     if (user) return;
@@ -36,12 +34,12 @@ export function GoogleOAuthDeepLink() {
         return;
       }
 
-      const code = parseGoogleOAuthCodeFromUrl(url);
-      if (!code || lastCode.current === code) return;
-      lastCode.current = code;
+      const sessionId = parseGoogleOAuthSessionIdFromUrl(url);
+      if (!sessionId || lastSessionId.current === sessionId) return;
+      lastSessionId.current = sessionId;
 
       await safeDismissBrowser();
-      const { ok, message } = await signInWithGoogleCode(code, googleRedirectUri);
+      const { ok, message } = await signInWithSessionId(sessionId);
       if (!ok) {
         Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
       }
@@ -54,7 +52,7 @@ export function GoogleOAuthDeepLink() {
       if (url) void handle(url);
     });
     return () => sub.remove();
-  }, [googleRedirectUri, signInWithGoogleCode, user]);
+  }, [signInWithSessionId, user]);
 
   return null;
 }

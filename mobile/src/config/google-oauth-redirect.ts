@@ -4,7 +4,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import { getApiBaseUrl } from './api';
 
-/** Google Cloud redirect URI (HTTPS). The API bridge then opens the app via `appReturnUri`. */
+/** Google Cloud redirect URI (HTTPS). Server exchanges the code and redirects to mobile-done. */
 export function resolveGoogleOAuthRedirectUri(): string {
   const override = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI?.trim();
   if (override) {
@@ -40,7 +40,16 @@ export function resolveGoogleOAuthRedirectUri(): string {
   });
 }
 
-/** Deep link `openAuthSessionAsync` waits for after the HTTPS bridge (Expo Go → exp://, builds → yamma://). */
+/** HTTPS URL openAuthSessionAsync waits for (not registered in Google Cloud). */
+export function resolveGoogleOAuthMobileDoneUri(): string {
+  const api = getApiBaseUrl().replace(/\/$/, '');
+  if (api.startsWith('https://')) {
+    return `${api}/auth/google/mobile-done`;
+  }
+  return `${api}/auth/google/mobile-done`;
+}
+
+/** @deprecated Legacy exp:// handoff — mobile-done HTTPS flow is preferred. */
 export function resolveGoogleOAuthAppReturnUri(): string {
   try {
     return Linking.createURL('oauthredirect');

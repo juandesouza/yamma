@@ -220,23 +220,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithSessionId = useCallback(
     async (sid: string) => {
-      try {
-        const res = await fetch(apiUrl('/auth/me'), {
-          method: 'POST',
-          headers: { ...ngrokFetchHeaders(), Authorization: `Bearer ${sid}` },
-        });
-        if (!res.ok) {
-          return { ok: false, message: `Could not load your account (HTTP ${res.status}).` };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const res = await fetch(apiUrl('/auth/me'), {
+            method: 'POST',
+            headers: { ...ngrokFetchHeaders(), Authorization: `Bearer ${sid}` },
+          });
+          if (!res.ok) {
+            return { ok: false, message: `Could not load your account (HTTP ${res.status}).` };
+          }
+          const body = (await res.json()) as { user: AuthUser };
+          if (!body.user) {
+            return { ok: false, message: 'Server did not return a user profile.' };
+          }
+          await signInWithSession(sid, body.user);
+          return { ok: true };
+        } catch {
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          return {
+            ok: false,
+            message: `Network error while finishing Google sign-in. Is the API reachable at ${apiUrl('/health').replace('/health', '')}?`,
+          };
         }
-        const body = (await res.json()) as { user: AuthUser };
-        if (!body.user) {
-          return { ok: false, message: 'Server did not return a user profile.' };
-        }
-        await signInWithSession(sid, body.user);
-        return { ok: true };
-      } catch {
-        return { ok: false, message: 'Network error while finishing Google sign-in.' };
       }
+      return { ok: false, message: 'Network error while finishing Google sign-in.' };
     },
     [signInWithSession],
   );

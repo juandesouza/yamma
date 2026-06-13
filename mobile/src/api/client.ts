@@ -1,5 +1,12 @@
 import { API_BASE_URL, ngrokFetchHeaders } from '../config/api';
 
+const API_RETRY_ATTEMPTS = 3;
+const API_RETRY_DELAY_MS = 2000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function apiUrl(path: string): string {
   const p = path.startsWith('/') ? path : `/${path}`;
   return `${API_BASE_URL}${p}`;
@@ -23,8 +30,42 @@ export type PostJsonResult<T> = {
   networkError?: string;
 };
 
-/** Unauthenticated JSON POST (login, register, guest). */
+/** Wake Render / cold API before OAuth (free tier can take several seconds). */
+export async function wakeApiHealth(): Promise<boolean> {
+  for (let attempt = 0; attempt < API_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(apiUrl('/health'), { headers: ngrokFetchHeaders() });
+      if (res.ok) return true;
+    } catch {
+      /* retry */
+    }
+    if (attempt < API_RETRY_ATTEMPTS - 1) {
+      await sleep(API_RETRY_DELAY_MS);
+    }
+  }
+  return false;
+}
+
+/** Unauthenticated JSON POST (login, register, guest). Retries on network failure. */
 export async function postJson<T>(path: string, body: unknown): Promise<PostJsonResult<T>> {
+  let lastNetworkError: string | undefined;
+  for (let attempt = 0; attempt < API_RETRY_ATTEMPTS; attempt++) {
+    const result = await postJsonOnce<T>(path, body);
+    if (!result.networkError) return result;
+    lastNetworkError = result.networkError;
+    if (attempt < API_RETRY_ATTEMPTS - 1) {
+      await sleep(API_RETRY_DELAY_MS);
+    }
+  }
+  return {
+    ok: false,
+    status: 0,
+    data: {} as T,
+    networkError: lastNetworkError,
+  };
+}
+
+async function postJsonOnce<T>(path: string, body: unknown): Promise<PostJsonResult<T>> {
   try {
     const res = await fetch(apiUrl(path), {
       method: 'POST',
