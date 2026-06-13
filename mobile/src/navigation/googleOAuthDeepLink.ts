@@ -1,8 +1,9 @@
 const EXPO_REDIRECT_PATH = '/auth/google/expo-redirect';
 const MOBILE_DONE_PATH = '/auth/google/mobile-done';
 
-function isMobileDoneUrl(url: URL): boolean {
-  return url.pathname.replace(/\/$/, '').endsWith(MOBILE_DONE_PATH);
+function isOAuthCallbackUrl(url: URL): boolean {
+  const path = url.pathname.replace(/\/$/, '');
+  return path.endsWith(EXPO_REDIRECT_PATH) || path.endsWith(MOBILE_DONE_PATH);
 }
 
 function isAppOAuthReturnUrl(url: URL): boolean {
@@ -16,17 +17,15 @@ function isAppOAuthReturnUrl(url: URL): boolean {
 }
 
 function isGoogleOAuthReturnUrl(url: URL): boolean {
-  if (url.pathname.replace(/\/$/, '').endsWith(EXPO_REDIRECT_PATH)) return true;
-  if (isMobileDoneUrl(url)) return true;
-  return isAppOAuthReturnUrl(url);
+  return isOAuthCallbackUrl(url) || isAppOAuthReturnUrl(url);
 }
 
-/** Session id from server-side OAuth exchange (/auth/google/mobile-done). */
+/** Session id from server-side OAuth exchange (expo-redirect or mobile-done). */
 export function parseGoogleOAuthSessionIdFromUrl(url: string): string | null {
   if (!url?.trim()) return null;
   try {
     const u = new URL(url);
-    if (!isMobileDoneUrl(u)) return null;
+    if (!isOAuthCallbackUrl(u)) return null;
     const sessionId = u.searchParams.get('sessionId')?.trim() ?? '';
     return sessionId || null;
   } catch {
@@ -34,12 +33,12 @@ export function parseGoogleOAuthSessionIdFromUrl(url: string): string | null {
   }
 }
 
-/** Authorization code from Google redirect (legacy client-side exchange). */
+/** Authorization code from Google redirect (client-side exchange fallback). */
 export function parseGoogleOAuthCodeFromUrl(url: string): string | null {
   if (!url?.trim()) return null;
   try {
     const u = new URL(url);
-    if (!isGoogleOAuthReturnUrl(u) || isMobileDoneUrl(u)) return null;
+    if (!isGoogleOAuthReturnUrl(u) || isOAuthCallbackUrl(u)) return null;
     const code = u.searchParams.get('code')?.trim() ?? '';
     return code || null;
   } catch {

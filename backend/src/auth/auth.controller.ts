@@ -28,7 +28,7 @@ import { z } from 'zod';
 import { isGuestUserEmail } from './guest.constants';
 import { DATABASE_UNAVAILABLE_MESSAGE, isDatabaseConnectionError } from '../common/db-errors';
 import {
-  buildGoogleOAuthMobileDoneUrl,
+  buildGoogleOAuthCallbackResultUrl,
   sendGoogleOAuthMobileDoneHtml,
 } from '../common/google-oauth-bridge';
 import { sign, verify } from 'jsonwebtoken';
@@ -393,14 +393,13 @@ export class AuthController {
 
   /**
    * Google OAuth redirect (registered in Google Cloud). Exchanges the code server-side and
-   * redirects to /auth/google/mobile-done so openAuthSessionAsync can dismiss on HTTPS.
+   * redirects back to the same URI with `sessionId` so promptAsync can read it.
    */
   @Get('google/expo-redirect')
   async googleExpoRedirect(
     @Query() query: Record<string, string | string[] | undefined>,
     @Res() res: Response,
   ) {
-    const apiBase = this.config.apiUrl.replace(/\/$/, '');
     const redirectUri = this.config.mobileGoogleExpoRedirectUri;
     const code = (Array.isArray(query.code) ? query.code[0] : query.code)?.trim();
     const oauthError =
@@ -410,7 +409,7 @@ export class AuthController {
     if (oauthError) {
       res.redirect(
         302,
-        buildGoogleOAuthMobileDoneUrl(apiBase, { error: oauthError.slice(0, 300) }),
+        buildGoogleOAuthCallbackResultUrl(redirectUri, { error: oauthError.slice(0, 300) }),
       );
       return;
     }
@@ -418,19 +417,21 @@ export class AuthController {
     if (!code) {
       res.redirect(
         302,
-        buildGoogleOAuthMobileDoneUrl(apiBase, { error: 'Missing authorization code from Google.' }),
+        buildGoogleOAuthCallbackResultUrl(redirectUri, {
+          error: 'Missing authorization code from Google.',
+        }),
       );
       return;
     }
 
     try {
       const { sessionId } = await this.completeGoogleOAuth(code, redirectUri);
-      res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiBase, { sessionId }));
+      res.redirect(302, buildGoogleOAuthCallbackResultUrl(redirectUri, { sessionId }));
     } catch (e: unknown) {
       if (isDatabaseConnectionError(e)) {
         res.redirect(
           302,
-          buildGoogleOAuthMobileDoneUrl(apiBase, {
+          buildGoogleOAuthCallbackResultUrl(redirectUri, {
             error: DATABASE_UNAVAILABLE_MESSAGE.slice(0, 300),
           }),
         );
@@ -447,7 +448,10 @@ export class AuthController {
       } else {
         message = formatUnknownError(e).slice(0, 300);
       }
-      res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiBase, { error: message.slice(0, 300) }));
+      res.redirect(
+        302,
+        buildGoogleOAuthCallbackResultUrl(redirectUri, { error: message.slice(0, 300) }),
+      );
     }
   }
 
