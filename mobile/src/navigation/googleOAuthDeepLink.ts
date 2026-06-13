@@ -33,12 +33,13 @@ export function parseGoogleOAuthSessionIdFromUrl(url: string): string | null {
   }
 }
 
-/** Authorization code from Google redirect (client-side exchange fallback). */
+/** Authorization code from Google redirect (expo-redirect ?code=). */
 export function parseGoogleOAuthCodeFromUrl(url: string): string | null {
   if (!url?.trim()) return null;
   try {
     const u = new URL(url);
-    if (!isGoogleOAuthReturnUrl(u) || isOAuthCallbackUrl(u)) return null;
+    if (!isGoogleOAuthReturnUrl(u)) return null;
+    if (u.searchParams.get('sessionId')?.trim()) return null;
     const code = u.searchParams.get('code')?.trim() ?? '';
     return code || null;
   } catch {

@@ -3,8 +3,9 @@ import type { AuthSessionResult } from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import { useMemo } from 'react';
 import type { GoogleOAuthClientIds } from '../config/google-oauth-config';
-import { resolveGoogleOAuthRedirectUri } from '../config/google-oauth-redirect';
+import { resolveGoogleOAuthRedirectUri, shouldUseGoogleOAuthProxy } from '../config/google-oauth-redirect';
 import {
+  parseGoogleOAuthCodeFromUrl,
   parseGoogleOAuthErrorFromUrl,
   parseGoogleOAuthSessionIdFromUrl,
 } from '../navigation/googleOAuthDeepLink';
@@ -13,12 +14,14 @@ WebBrowser.maybeCompleteAuthSession();
 
 export function useGoogleAuthRequest(ids: GoogleOAuthClientIds) {
   const redirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
+  const useProxy = useMemo(() => shouldUseGoogleOAuthProxy(), []);
 
   return Google.useAuthRequest({
     androidClientId: ids.androidClientId,
     iosClientId: ids.iosClientId,
     webClientId: ids.webClientId,
     redirectUri,
+    useProxy,
     usePKCE: false,
     selectAccount: true,
     shouldAutoExchangeCode: false,
@@ -38,7 +41,11 @@ export function readGoogleAuthSessionId(response: AuthSessionResult | null): str
 export function readGoogleAuthCode(response: AuthSessionResult | null): string | null {
   if (response?.type !== 'success' || !('params' in response)) return null;
   const code = response.params.code;
-  return typeof code === 'string' && code.trim() ? code.trim() : null;
+  if (typeof code === 'string' && code.trim()) return code.trim();
+  if (typeof response.url === 'string') {
+    return parseGoogleOAuthCodeFromUrl(response.url);
+  }
+  return null;
 }
 
 export function readGoogleAuthError(response: AuthSessionResult | null): string | null {

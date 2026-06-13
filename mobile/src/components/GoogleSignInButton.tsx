@@ -12,7 +12,7 @@ import type { AuthSessionResult } from 'expo-auth-session';
 import { wakeApiHealth } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds, type GoogleOAuthClientIds } from '../config/google-oauth-config';
-import { getGoogleOAuthRedirectPreview, resolveGoogleOAuthRedirectUri } from '../config/google-oauth-redirect';
+import { getGoogleOAuthRedirectPreview, resolveGoogleOAuthRedirectUri, shouldUseGoogleOAuthProxy } from '../config/google-oauth-redirect';
 import {
   readGoogleAuthCode,
   readGoogleAuthError,
@@ -95,7 +95,7 @@ function GoogleSignInButtonInner({
       }
 
       await WebBrowser.warmUpAsync();
-      const result = await promptAsync({ showInRecents: true });
+      const result = await promptAsync({ showInRecents: true, useProxy: shouldUseGoogleOAuthProxy() });
       await finishFromAuthResult(result);
     } catch (e) {
       Alert.alert(
