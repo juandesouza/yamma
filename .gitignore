@@ -10,6 +10,7 @@ node_modules
 dist
 .next
 *.log
+*.tsbuildinfo
 .DS_Store
 coverage
 .turbo
