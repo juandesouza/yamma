@@ -1,10 +1,10 @@
 import * as Google from 'expo-auth-session/providers/google';
+import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -13,28 +13,9 @@ import {
 import { wakeApiHealth } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds, type GoogleOAuthClientIds } from '../config/google-oauth-config';
-import {
-  getGoogleOAuthRedirectPreview,
-  resolveGoogleOAuthRedirectUri,
-} from '../config/google-oauth-redirect';
+import { resolveGoogleOAuthRedirectUri } from '../config/google-oauth-redirect';
+import { withGoogleMobileOAuthState } from '../config/google-oauth-state';
 import { useGoogleAuthRequest } from '../hooks/useGoogleSignIn';
-import {
-  parseGoogleOAuthCodeFromUrl,
-  parseGoogleOAuthErrorFromUrl,
-} from '../navigation/googleOAuthDeepLink';
-
-WebBrowser.maybeCompleteAuthSession();
-
-async function safeDismissBrowser(): Promise<void> {
-  try {
-    const result = WebBrowser.dismissBrowser();
-    if (result && typeof (result as Promise<unknown>).then === 'function') {
-      await result;
-    }
-  } catch {
-    /* unavailable in Expo Go on some platforms */
-  }
-}
 
 type Props = {
   disabled?: boolean;
@@ -46,14 +27,15 @@ function GoogleSignInButtonInner({
   variant,
   clientIds,
 }: Props & { clientIds: GoogleOAuthClientIds }) {
-  const { signInWithGoogleCode } = useAuth();
+  const { user } = useAuth();
   const [busy, setBusy] = useState(false);
 
   const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
+  const appReturnUri = useMemo(() => Linking.createURL('oauthredirect'), []);
   const [request] = useGoogleAuthRequest(clientIds);
 
   const onPress = useCallback(async () => {
-    if (!request) return;
+    if (!request || user) return;
 
     setBusy(true);
     try {
@@ -66,44 +48,13 @@ function GoogleSignInButtonInner({
         return;
       }
 
-      const authUrl = request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
+      const rawAuthUrl =
+        request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
+      const authUrl = withGoogleMobileOAuthState(rawAuthUrl, appReturnUri);
 
       await WebBrowser.warmUpAsync();
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, googleRedirectUri, {
-        showInRecents: true,
-        ...(Platform.OS === 'android' ? { createTask: false } : {}),
-      });
-      await safeDismissBrowser();
-
-      if (result.type === 'cancel' || result.type === 'dismiss') return;
-
-      if (result.type !== 'success' || !result.url) {
-        Alert.alert(
-          'Google sign-in failed',
-          'The sign-in browser closed unexpectedly. Try again.',
-        );
-        return;
-      }
-
-      const oauthError = parseGoogleOAuthErrorFromUrl(result.url);
-      if (oauthError) {
-        Alert.alert('Google sign-in failed', oauthError);
-        return;
-      }
-
-      const code = parseGoogleOAuthCodeFromUrl(result.url);
-      if (!code) {
-        Alert.alert(
-          'Google sign-in incomplete',
-          `No authorization code received. Add this redirect URI in Google Cloud (Web client):\n${getGoogleOAuthRedirectPreview()}`,
-        );
-        return;
-      }
-
-      const { ok, message } = await signInWithGoogleCode(code, googleRedirectUri);
-      if (!ok) {
-        Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
-      }
+      // openBrowserAsync + API bridge exp:// handoff (openAuthSessionAsync hangs on Android).
+      await WebBrowser.openBrowserAsync(authUrl);
     } catch (e) {
       Alert.alert(
         'Google sign-in failed',
@@ -117,7 +68,7 @@ function GoogleSignInButtonInner({
       }
       setBusy(false);
     }
-  }, [googleRedirectUri, request, signInWithGoogleCode]);
+  }, [appReturnUri, request, user]);
 
   const waitingForGoogleRequest = !request;
   const loading = busy || waitingForGoogleRequest;
@@ -153,7 +104,7 @@ export default function GoogleSignInButton({ disabled, variant = 'login' }: Prop
         onPress={() =>
           Alert.alert(
             'Google sign-in not configured',
-            'Add EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in mobile/.env (same Web client as yamma-api on Render).',
+            'Add EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID in mobile/.env.',
           )
         }
       >

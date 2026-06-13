@@ -28,8 +28,18 @@ export function parseAppResumeTarget(value: string | undefined): string | null {
 export function unpackGoogleMobileOAuthState(state: string | undefined): string | null {
   if (!state?.trim()) return null;
   const raw = state.trim();
+  let json: string | null = null;
   try {
-    const json = Buffer.from(raw, 'base64url').toString('utf8');
+    json = Buffer.from(raw, 'base64url').toString('utf8');
+  } catch {
+    try {
+      const padded = raw.replace(/-/g, '+').replace(/_/g, '/');
+      json = Buffer.from(padded, 'base64').toString('utf8');
+    } catch {
+      return null;
+    }
+  }
+  try {
     const parsed = JSON.parse(json) as { r?: string };
     if (typeof parsed.r === 'string') {
       return parseAppResumeTarget(parsed.r);
