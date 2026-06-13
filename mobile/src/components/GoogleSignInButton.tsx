@@ -1,5 +1,4 @@
 import * as Google from 'expo-auth-session/providers/google';
-import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -13,9 +12,14 @@ import {
 import { wakeApiHealth } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds, type GoogleOAuthClientIds } from '../config/google-oauth-config';
-import { resolveGoogleOAuthRedirectUri } from '../config/google-oauth-redirect';
-import { withGoogleMobileOAuthState } from '../config/google-oauth-state';
+import {
+  resolveGoogleOAuthAuthSessionReturnUri,
+} from '../config/google-oauth-redirect';
 import { useGoogleAuthRequest } from '../hooks/useGoogleSignIn';
+import {
+  parseGoogleOAuthErrorFromUrl,
+  parseGoogleOAuthSessionIdFromUrl,
+} from '../navigation/googleOAuthDeepLink';
 
 type Props = {
   disabled?: boolean;
@@ -27,12 +31,33 @@ function GoogleSignInButtonInner({
   variant,
   clientIds,
 }: Props & { clientIds: GoogleOAuthClientIds }) {
-  const { user } = useAuth();
+  const { user, signInWithSessionId } = useAuth();
   const [busy, setBusy] = useState(false);
 
-  const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
-  const appReturnUri = useMemo(() => Linking.createURL('oauthredirect'), []);
+  const authSessionReturnUri = useMemo(() => resolveGoogleOAuthAuthSessionReturnUri(), []);
   const [request] = useGoogleAuthRequest(clientIds);
+
+  const finishWithSessionUrl = useCallback(
+    async (url: string | undefined) => {
+      if (!url) return false;
+
+      const oauthError = parseGoogleOAuthErrorFromUrl(url);
+      if (oauthError) {
+        Alert.alert('Google sign-in failed', oauthError);
+        return true;
+      }
+
+      const sessionId = parseGoogleOAuthSessionIdFromUrl(url);
+      if (!sessionId) return false;
+
+      const { ok, message } = await signInWithSessionId(sessionId);
+      if (!ok) {
+        Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
+      }
+      return true;
+    },
+    [signInWithSessionId],
+  );
 
   const onPress = useCallback(async () => {
     if (!request || user) return;
@@ -48,13 +73,31 @@ function GoogleSignInButtonInner({
         return;
       }
 
-      const rawAuthUrl =
-        request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
-      const authUrl = withGoogleMobileOAuthState(rawAuthUrl, appReturnUri);
+      const authUrl = request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
 
       await WebBrowser.warmUpAsync();
-      // openBrowserAsync + API bridge exp:// handoff (openAuthSessionAsync hangs on Android).
-      await WebBrowser.openBrowserAsync(authUrl);
+      const browserResult = await WebBrowser.openAuthSessionAsync(authUrl, authSessionReturnUri);
+
+      if (browserResult.type === 'cancel' || browserResult.type === 'dismiss') {
+        return;
+      }
+
+      if (browserResult.type === 'success' || browserResult.type === 'opened') {
+        const handled = await finishWithSessionUrl(
+          browserResult.type === 'success' ? browserResult.url : undefined,
+        );
+        if (!handled && browserResult.type === 'opened') {
+          Alert.alert(
+            'Google sign-in incomplete',
+            'The browser closed before we could finish sign-in. Try again.',
+          );
+        }
+      } else if (browserResult.type === 'error') {
+        Alert.alert(
+          'Google sign-in failed',
+          browserResult.error?.message ?? 'Try again or use email.',
+        );
+      }
     } catch (e) {
       Alert.alert(
         'Google sign-in failed',
@@ -68,7 +111,7 @@ function GoogleSignInButtonInner({
       }
       setBusy(false);
     }
-  }, [appReturnUri, request, user]);
+  }, [authSessionReturnUri, finishWithSessionUrl, request, user]);
 
   const waitingForGoogleRequest = !request;
   const loading = busy || waitingForGoogleRequest;

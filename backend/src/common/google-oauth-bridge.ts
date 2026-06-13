@@ -82,6 +82,7 @@ export function sendGoogleOAuthErrorHtml(res: Response, errorMessage: string) {
 }
 
 /** Static page openAuthSessionAsync lands on after server-side OAuth exchange. */
+/** Final landing page for openAuthSessionAsync after expo-redirect 302 (query carries sessionId or error). */
 export function sendGoogleOAuthMobileDoneHtml(res: Response) {
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Signed in with Google</p><p style="margin:0;font-size:14px;opacity:.75">Returning to Yamma…</p><script>try{window.close();}catch(e){}</script></body></html>`;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');

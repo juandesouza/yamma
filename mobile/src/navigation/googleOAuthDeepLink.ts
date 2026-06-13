@@ -1,4 +1,5 @@
 const EXPO_REDIRECT_PATH = '/auth/google/expo-redirect';
+const MOBILE_DONE_PATH = '/auth/google/mobile-done';
 
 function isAppOAuthReturnUrl(url: URL): boolean {
   if (url.protocol === 'yamma:') {
@@ -13,6 +14,7 @@ function isAppOAuthReturnUrl(url: URL): boolean {
 function isGoogleOAuthReturnUrl(url: URL): boolean {
   const path = url.pathname.replace(/\/$/, '');
   if (path.endsWith(EXPO_REDIRECT_PATH)) return true;
+  if (path.endsWith(MOBILE_DONE_PATH)) return true;
   return isAppOAuthReturnUrl(url);
 }
 

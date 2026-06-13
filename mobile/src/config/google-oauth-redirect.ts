@@ -42,3 +42,24 @@ export function resolveGoogleOAuthRedirectUri(): string {
 export function getGoogleOAuthRedirectPreview(): string {
   return resolveGoogleOAuthRedirectUri();
 }
+
+/** HTTPS URL `openAuthSessionAsync` waits for after Google redirects to expo-redirect (Lemon checkout pattern). */
+export function resolveGoogleOAuthAuthSessionReturnUri(): string {
+  const override = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_SESSION_RETURN_URI?.trim();
+  if (override) {
+    return override.replace(/\/$/, '');
+  }
+
+  const oauthRedirect = resolveGoogleOAuthRedirectUri();
+  if (oauthRedirect.startsWith('https://')) {
+    const origin = new URL(oauthRedirect).origin;
+    return `${origin}/auth/google/mobile-done`;
+  }
+
+  const api = getApiBaseUrl().replace(/\/$/, '');
+  if (api.startsWith('https://')) {
+    return `${api}/auth/google/mobile-done`;
+  }
+
+  return `${api}/auth/google/mobile-done`;
+}

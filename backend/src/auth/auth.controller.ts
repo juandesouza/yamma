@@ -28,8 +28,7 @@ import { z } from 'zod';
 import { isGuestUserEmail } from './guest.constants';
 import { DATABASE_UNAVAILABLE_MESSAGE, isDatabaseConnectionError } from '../common/db-errors';
 import {
-  resolveGoogleOAuthAppReturnTarget,
-  sendAppResumeHtml,
+  buildGoogleOAuthMobileDoneUrl,
   sendGoogleOAuthMobileDoneHtml,
 } from '../common/google-oauth-bridge';
 import { sign, verify } from 'jsonwebtoken';
@@ -393,8 +392,8 @@ export class AuthController {
   }
 
   /**
-   * Google OAuth redirect (registered in Google Cloud). Exchanges code server-side and
-   * opens Expo Go via exp://oauthredirect?sessionId= (payment-return bridge pattern).
+   * Google OAuth redirect (registered in Google Cloud). Exchanges code server-side then
+   * 302 → /auth/google/mobile-done?sessionId= so openAuthSessionAsync completes (Lemon pattern).
    */
   @Get('google/expo-redirect')
   async googleExpoRedirect(
@@ -402,24 +401,25 @@ export class AuthController {
     @Res() res: Response,
   ) {
     const redirectUri = this.config.mobileGoogleExpoRedirectUri;
-    const state = Array.isArray(query.state) ? query.state[0] : query.state;
     const code = (Array.isArray(query.code) ? query.code[0] : query.code)?.trim();
     const oauthError =
       (Array.isArray(query.error_description) ? query.error_description[0] : query.error_description)?.trim() ||
       (Array.isArray(query.error) ? query.error[0] : query.error)?.trim();
 
+    const apiUrl = this.config.apiUrl.replace(/\/$/, '');
+
     if (oauthError) {
-      sendAppResumeHtml(
-        res,
-        resolveGoogleOAuthAppReturnTarget(state, { error: oauthError.slice(0, 300) }),
+      res.redirect(
+        302,
+        buildGoogleOAuthMobileDoneUrl(apiUrl, { error: oauthError.slice(0, 300) }),
       );
       return;
     }
 
     if (!code) {
-      sendAppResumeHtml(
-        res,
-        resolveGoogleOAuthAppReturnTarget(state, {
+      res.redirect(
+        302,
+        buildGoogleOAuthMobileDoneUrl(apiUrl, {
           error: 'Missing authorization code from Google.',
         }),
       );
@@ -428,12 +428,12 @@ export class AuthController {
 
     try {
       const { sessionId } = await this.completeGoogleOAuth(code, redirectUri);
-      sendAppResumeHtml(res, resolveGoogleOAuthAppReturnTarget(state, { sessionId }));
+      res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiUrl, { sessionId }));
     } catch (e: unknown) {
       if (isDatabaseConnectionError(e)) {
-        sendAppResumeHtml(
-          res,
-          resolveGoogleOAuthAppReturnTarget(state, {
+        res.redirect(
+          302,
+          buildGoogleOAuthMobileDoneUrl(apiUrl, {
             error: DATABASE_UNAVAILABLE_MESSAGE.slice(0, 300),
           }),
         );
@@ -450,10 +450,7 @@ export class AuthController {
       } else {
         message = formatUnknownError(e).slice(0, 300);
       }
-      sendAppResumeHtml(
-        res,
-        resolveGoogleOAuthAppReturnTarget(state, { error: message.slice(0, 300) }),
-      );
+      res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiUrl, { error: message.slice(0, 300) }));
     }
   }
 
