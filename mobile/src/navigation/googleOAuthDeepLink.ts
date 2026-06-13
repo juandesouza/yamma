@@ -20,12 +20,12 @@ function isGoogleOAuthReturnUrl(url: URL): boolean {
   return isOAuthCallbackUrl(url) || isAppOAuthReturnUrl(url);
 }
 
-/** Session id from server-side OAuth exchange (expo-redirect or mobile-done). */
+/** Session id from API bridge or exp:// / yamma:// deep link. */
 export function parseGoogleOAuthSessionIdFromUrl(url: string): string | null {
   if (!url?.trim()) return null;
   try {
     const u = new URL(url);
-    if (!isOAuthCallbackUrl(u)) return null;
+    if (!isGoogleOAuthReturnUrl(u)) return null;
     const sessionId = u.searchParams.get('sessionId')?.trim() ?? '';
     return sessionId || null;
   } catch {
@@ -33,7 +33,7 @@ export function parseGoogleOAuthSessionIdFromUrl(url: string): string | null {
   }
 }
 
-/** Authorization code from Google redirect (expo-redirect ?code=). */
+/** Authorization code from Google redirect (client-side exchange fallback). */
 export function parseGoogleOAuthCodeFromUrl(url: string): string | null {
   if (!url?.trim()) return null;
   try {

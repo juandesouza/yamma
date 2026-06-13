@@ -1,24 +1,40 @@
+import * as Google from 'expo-auth-session/providers/google';
+import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import type { AuthSessionResult } from 'expo-auth-session';
 import { wakeApiHealth } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds, type GoogleOAuthClientIds } from '../config/google-oauth-config';
-import { getGoogleOAuthRedirectPreview, resolveGoogleOAuthRedirectUri, shouldUseGoogleOAuthProxy } from '../config/google-oauth-redirect';
+import { getGoogleOAuthRedirectPreview, resolveGoogleOAuthRedirectUri } from '../config/google-oauth-redirect';
+import { withGoogleMobileOAuthState } from '../config/google-oauth-state';
+import { useGoogleAuthRequest } from '../hooks/useGoogleSignIn';
 import {
-  readGoogleAuthCode,
-  readGoogleAuthError,
-  readGoogleAuthSessionId,
-  useGoogleAuthRequest,
-} from '../hooks/useGoogleSignIn';
+  parseGoogleOAuthCodeFromUrl,
+  parseGoogleOAuthErrorFromUrl,
+  parseGoogleOAuthSessionIdFromUrl,
+} from '../navigation/googleOAuthDeepLink';
+
+WebBrowser.maybeCompleteAuthSession();
+
+async function safeDismissBrowser(): Promise<void> {
+  try {
+    const result = WebBrowser.dismissBrowser();
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      await result;
+    }
+  } catch {
+    /* unavailable in Expo Go on some platforms */
+  }
+}
 
 type Props = {
   disabled?: boolean;
@@ -34,33 +50,18 @@ function GoogleSignInButtonInner({
   const [busy, setBusy] = useState(false);
 
   const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
-  const [request, , promptAsync] = useGoogleAuthRequest(clientIds);
+  const appReturnUri = useMemo(() => Linking.createURL('oauthredirect'), []);
+  const [request] = useGoogleAuthRequest(clientIds);
 
-  const finishFromAuthResult = useCallback(
-    async (result: AuthSessionResult) => {
-      if (result.type === 'cancel' || result.type === 'dismiss') return;
-
-      const oauthError = readGoogleAuthError(result);
+  const finishFromReturnUrl = useCallback(
+    async (url: string) => {
+      const oauthError = parseGoogleOAuthErrorFromUrl(url);
       if (oauthError) {
         Alert.alert('Google sign-in failed', oauthError);
         return;
       }
 
-      if (result.type !== 'success') {
-        Alert.alert('Google sign-in failed', 'The sign-in browser closed unexpectedly. Try again.');
-        return;
-      }
-
-      const code = readGoogleAuthCode(result);
-      if (code) {
-        const { ok, message } = await signInWithGoogleCode(code, googleRedirectUri);
-        if (!ok) {
-          Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
-        }
-        return;
-      }
-
-      const sessionId = readGoogleAuthSessionId(result);
+      const sessionId = parseGoogleOAuthSessionIdFromUrl(url);
       if (sessionId) {
         const { ok, message } = await signInWithSessionId(sessionId);
         if (!ok) {
@@ -69,10 +70,14 @@ function GoogleSignInButtonInner({
         return;
       }
 
-      Alert.alert(
-        'Google sign-in incomplete',
-        `No authorization code received. Add this redirect URI in Google Cloud (Web client):\n${getGoogleOAuthRedirectPreview()}`,
-      );
+      const code = parseGoogleOAuthCodeFromUrl(url);
+      if (code) {
+        const { ok, message } = await signInWithGoogleCode(code, googleRedirectUri);
+        if (!ok) {
+          Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
+        }
+        return;
+      }
     },
     [googleRedirectUri, signInWithGoogleCode, signInWithSessionId],
   );
@@ -94,9 +99,28 @@ function GoogleSignInButtonInner({
         return;
       }
 
+      const rawAuthUrl =
+        request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
+      const authUrl = withGoogleMobileOAuthState(rawAuthUrl, appReturnUri);
+
       await WebBrowser.warmUpAsync();
-      const result = await promptAsync({ showInRecents: true, useProxy: shouldUseGoogleOAuthProxy() });
-      await finishFromAuthResult(result);
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, googleRedirectUri, {
+        showInRecents: true,
+        ...(Platform.OS === 'android' ? { createTask: false } : {}),
+      });
+      await safeDismissBrowser();
+
+      if (result.type === 'success' && result.url) {
+        await finishFromReturnUrl(result.url);
+        return;
+      }
+
+      if (result.type !== 'cancel' && result.type !== 'dismiss') {
+        Alert.alert(
+          'Google sign-in incomplete',
+          `Confirm this redirect URI in Google Cloud (Web client):\n${getGoogleOAuthRedirectPreview()}`,
+        );
+      }
     } catch (e) {
       Alert.alert(
         'Google sign-in failed',
