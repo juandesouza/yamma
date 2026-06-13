@@ -54,6 +54,23 @@ export function appendQueryToDeepLink(
   return `${base}${base.includes('?') ? '&' : '?'}${qs}`;
 }
 
+/** Final OAuth callback page — URL keeps query params for promptAsync (no further redirects). */
+export function sendGoogleOAuthCallbackHtml(res: Response, message = 'Returning to Yamma…') {
+  const safe = escapeHtmlAttr(message);
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Signed in with Google</p><p style="margin:0;font-size:14px;opacity:.75">${safe}</p><script>try{window.close();}catch(e){}</script></body></html>`;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.status(200).send(html);
+}
+
+export function sendGoogleOAuthErrorHtml(res: Response, errorMessage: string) {
+  const safe = escapeHtmlAttr(errorMessage.slice(0, 300));
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Google sign-in failed</p><p style="margin:0;font-size:14px;opacity:.75">${safe}</p></body></html>`;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.status(200).send(html);
+}
+
 /** Static page openAuthSessionAsync lands on after server-side OAuth exchange. */
 export function sendGoogleOAuthMobileDoneHtml(res: Response) {
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Yamma</title></head><body style="margin:0;background:#0f1014;color:#e5e7eb;font-family:system-ui,sans-serif;text-align:center;padding:32px 16px"><p style="font-size:17px;margin:0 0 12px">Signed in with Google</p><p style="margin:0;font-size:14px;opacity:.75">Returning to Yamma…</p><script>try{window.close();}catch(e){}</script></body></html>`;
