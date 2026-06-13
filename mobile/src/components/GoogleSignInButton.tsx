@@ -1,21 +1,40 @@
+import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { wakeApiHealth } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds, type GoogleOAuthClientIds } from '../config/google-oauth-config';
 import {
   getGoogleOAuthRedirectPreview,
-  readGoogleAuthCode,
-  useGoogleAuthCode,
-  useGoogleAuthRequest,
-} from '../hooks/useGoogleSignIn';
+  resolveGoogleOAuthRedirectUri,
+} from '../config/google-oauth-redirect';
+import { useGoogleAuthRequest } from '../hooks/useGoogleSignIn';
+import {
+  parseGoogleOAuthCodeFromUrl,
+  parseGoogleOAuthErrorFromUrl,
+} from '../navigation/googleOAuthDeepLink';
+
+WebBrowser.maybeCompleteAuthSession();
+
+async function safeDismissBrowser(): Promise<void> {
+  try {
+    const result = WebBrowser.dismissBrowser();
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      await result;
+    }
+  } catch {
+    /* unavailable in Expo Go on some platforms */
+  }
+}
 
 type Props = {
   disabled?: boolean;
@@ -30,77 +49,78 @@ function GoogleSignInButtonInner({
   const { signInWithGoogleCode } = useAuth();
   const [busy, setBusy] = useState(false);
 
-  const redirectUri = getGoogleOAuthRedirectPreview();
-  const [request, response, promptAsync] = useGoogleAuthRequest(clientIds);
-
-  const handleGoogleCode = useCallback(
-    async (code: string) => {
-      setBusy(true);
-      try {
-        const { ok, message } = await signInWithGoogleCode(code, redirectUri);
-        if (!ok) {
-          Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
-        }
-      } finally {
-        setBusy(false);
-      }
-    },
-    [redirectUri, signInWithGoogleCode],
-  );
-
-  useGoogleAuthCode(response ?? null, (code) => {
-    void handleGoogleCode(code);
-  });
-
-  useEffect(() => {
-    if (!response || response.type !== 'success') return;
-    if (readGoogleAuthCode(response)) return;
-    setBusy(true);
-    const timer = setTimeout(() => {
-      setBusy(false);
-      Alert.alert(
-        'Google sign-in incomplete',
-        `Google did not return a code. Add this redirect URI in Google Cloud (Web client):\n${redirectUri}`,
-      );
-    }, 25_000);
-    return () => clearTimeout(timer);
-  }, [response, redirectUri]);
-
-  const waitingForGoogleRequest = !request;
-  const loading = busy || waitingForGoogleRequest;
+  const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
+  const [request] = useGoogleAuthRequest(clientIds);
 
   const onPress = useCallback(async () => {
     if (!request) return;
+
+    setBusy(true);
     try {
-      await WebBrowser.warmUpAsync();
-      const r = await promptAsync({ showInRecents: true });
-      if (r?.type === 'cancel' || r?.type === 'dismiss') return;
-      if (r.type === 'error') {
-        const msg =
-          (r.error instanceof Error && r.error.message) ||
-          (typeof r.params?.error_description === 'string' && r.params.error_description) ||
-          (typeof r.params?.error === 'string' && r.params.error) ||
-          'unknown';
+      const apiReady = await wakeApiHealth();
+      if (!apiReady) {
         Alert.alert(
-          'Google sign-in failed',
-          `Google OAuth error (${msg}). Add this redirect URI in Google Cloud (Web client):\n${redirectUri}\n\nIf auth.expo.io shows "something went wrong", confirm owner is juandesouza and slug is yamma in app.config.js.`,
+          'API unreachable',
+          'Could not reach the Yamma API. Wait a moment (Render may be waking up) and try again.',
         );
         return;
       }
-      const code = readGoogleAuthCode(r);
-      if (code) {
-        await handleGoogleCode(code);
+
+      const authUrl = request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
+
+      await WebBrowser.warmUpAsync();
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, googleRedirectUri, {
+        showInRecents: true,
+        ...(Platform.OS === 'android' ? { createTask: false } : {}),
+      });
+      await safeDismissBrowser();
+
+      if (result.type === 'cancel' || result.type === 'dismiss') return;
+
+      if (result.type !== 'success' || !result.url) {
+        Alert.alert(
+          'Google sign-in failed',
+          'The sign-in browser closed unexpectedly. Try again.',
+        );
+        return;
+      }
+
+      const oauthError = parseGoogleOAuthErrorFromUrl(result.url);
+      if (oauthError) {
+        Alert.alert('Google sign-in failed', oauthError);
+        return;
+      }
+
+      const code = parseGoogleOAuthCodeFromUrl(result.url);
+      if (!code) {
+        Alert.alert(
+          'Google sign-in incomplete',
+          `No authorization code received. Add this redirect URI in Google Cloud (Web client):\n${getGoogleOAuthRedirectPreview()}`,
+        );
+        return;
+      }
+
+      const { ok, message } = await signInWithGoogleCode(code, googleRedirectUri);
+      if (!ok) {
+        Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
       }
     } catch (e) {
       Alert.alert(
         'Google sign-in failed',
-        `${e instanceof Error ? e.message : 'Try again or use email.'}\n\nRedirect URI:\n${redirectUri}`,
+        e instanceof Error ? e.message : 'Try again or use email.',
       );
     } finally {
-      await WebBrowser.coolDownAsync();
+      try {
+        await WebBrowser.coolDownAsync();
+      } catch {
+        /* optional */
+      }
+      setBusy(false);
     }
-  }, [handleGoogleCode, promptAsync, redirectUri, request]);
+  }, [googleRedirectUri, request, signInWithGoogleCode]);
 
+  const waitingForGoogleRequest = !request;
+  const loading = busy || waitingForGoogleRequest;
   const verb = variant === 'register' ? 'Sign up' : 'Continue';
 
   return (

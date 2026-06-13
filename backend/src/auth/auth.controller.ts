@@ -28,8 +28,8 @@ import { z } from 'zod';
 import { isGuestUserEmail } from './guest.constants';
 import { DATABASE_UNAVAILABLE_MESSAGE, isDatabaseConnectionError } from '../common/db-errors';
 import {
-  resolveGoogleOAuthAppReturnTarget,
-  sendAppResumeHtml,
+  sendGoogleOAuthBridgeHtml,
+  sendGoogleOAuthErrorHtml,
   sendGoogleOAuthMobileDoneHtml,
 } from '../common/google-oauth-bridge';
 import { sign, verify } from 'jsonwebtoken';
@@ -393,68 +393,31 @@ export class AuthController {
   }
 
   /**
-   * Google OAuth redirect (registered in Google Cloud). Exchanges the code server-side and
-   * opens the app via exp:// / yamma:// (same pattern as payment return bridge).
+   * Google OAuth redirect (registered in Google Cloud). Static HTML only — the app reads
+   * `?code=` via openAuthSessionAsync and exchanges via POST /auth/google/mobile-code.
    */
   @Get('google/expo-redirect')
-  async googleExpoRedirect(
+  @HttpCode(HttpStatus.OK)
+  googleExpoRedirect(
     @Query() query: Record<string, string | string[] | undefined>,
     @Res() res: Response,
   ) {
-    const redirectUri = this.config.mobileGoogleExpoRedirectUri;
-    const state = Array.isArray(query.state) ? query.state[0] : query.state;
     const code = (Array.isArray(query.code) ? query.code[0] : query.code)?.trim();
     const oauthError =
       (Array.isArray(query.error_description) ? query.error_description[0] : query.error_description)?.trim() ||
       (Array.isArray(query.error) ? query.error[0] : query.error)?.trim();
 
     if (oauthError) {
-      sendAppResumeHtml(
-        res,
-        resolveGoogleOAuthAppReturnTarget(state, { error: oauthError.slice(0, 300) }),
-      );
+      sendGoogleOAuthErrorHtml(res, oauthError);
       return;
     }
 
-    if (!code) {
-      sendAppResumeHtml(
-        res,
-        resolveGoogleOAuthAppReturnTarget(state, {
-          error: 'Missing authorization code from Google.',
-        }),
-      );
+    if (code) {
+      sendGoogleOAuthBridgeHtml(res);
       return;
     }
 
-    try {
-      const { sessionId } = await this.completeGoogleOAuth(code, redirectUri);
-      sendAppResumeHtml(res, resolveGoogleOAuthAppReturnTarget(state, { sessionId }));
-    } catch (e: unknown) {
-      if (isDatabaseConnectionError(e)) {
-        sendAppResumeHtml(
-          res,
-          resolveGoogleOAuthAppReturnTarget(state, {
-            error: DATABASE_UNAVAILABLE_MESSAGE.slice(0, 300),
-          }),
-        );
-        return;
-      }
-      let message = 'Google sign-in failed';
-      if (e instanceof HttpException) {
-        const r = e.getResponse();
-        if (typeof r === 'string') message = r;
-        else if (r && typeof r === 'object' && 'message' in r) {
-          const m = (r as { message?: string | string[] }).message;
-          message = Array.isArray(m) ? m.join(', ') : String(m ?? message);
-        }
-      } else {
-        message = formatUnknownError(e).slice(0, 300);
-      }
-      sendAppResumeHtml(
-        res,
-        resolveGoogleOAuthAppReturnTarget(state, { error: message.slice(0, 300) }),
-      );
-    }
+    sendGoogleOAuthErrorHtml(res, 'Missing authorization code from Google.');
   }
 
   /** HTTPS return URL for openAuthSessionAsync (not registered in Google Cloud). */

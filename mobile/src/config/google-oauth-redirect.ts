@@ -1,15 +1,21 @@
 import * as AuthSession from 'expo-auth-session';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
+import { getApiBaseUrl } from './api';
 
 /**
- * Google Web OAuth clients only allow http(s) redirect URIs (not exp://).
- * Expo Go must use the HTTPS proxy: https://auth.expo.io/@owner/slug (same as Nexo).
+ * Google OAuth redirect URI (registered in Google Cloud Web client).
+ * Expo Go uses the yamma-api HTTPS bridge — same idea as Lemon payment return URLs.
  */
 export function resolveGoogleOAuthRedirectUri(): string {
   const override = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI?.trim();
   if (override) {
     return override.replace(/\/$/, '');
+  }
+
+  const api = getApiBaseUrl().replace(/\/$/, '');
+  if (api.startsWith('https://')) {
+    return `${api}/auth/google/expo-redirect`;
   }
 
   if (Platform.OS === 'web') {
@@ -20,7 +26,9 @@ export function resolveGoogleOAuthRedirectUri(): string {
     try {
       return AuthSession.getRedirectUrl();
     } catch {
-      /* missing expo.owner — caller should surface env hint */
+      const owner = Constants.expoConfig?.owner ?? 'juandesouza';
+      const slug = Constants.expoConfig?.slug ?? 'yamma';
+      return `https://auth.expo.io/@${owner}/${slug}`;
     }
   }
 
