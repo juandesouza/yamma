@@ -20,7 +20,7 @@ export function useGoogleAuthRequest(ids: GoogleOAuthClientIds) {
     webClientId: ids.webClientId,
     redirectUri,
     usePKCE: false,
-    selectAccount: false,
+    selectAccount: true,
     shouldAutoExchangeCode: false,
   });
 }
@@ -42,7 +42,12 @@ export function readGoogleAuthCode(response: AuthSessionResult | null): string |
 }
 
 export function readGoogleAuthError(response: AuthSessionResult | null): string | null {
-  if (response?.type !== 'success' || !('params' in response)) return null;
+  if (!response) return null;
+  if (response.type === 'error') {
+    if (response.error instanceof Error && response.error.message) return response.error.message;
+    return 'Google sign-in failed';
+  }
+  if (response.type !== 'success' || !('params' in response)) return null;
   const fromParams =
     (typeof response.params.error_description === 'string' && response.params.error_description) ||
     (typeof response.params.error === 'string' && response.params.error) ||

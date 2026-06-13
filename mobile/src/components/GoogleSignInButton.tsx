@@ -1,5 +1,5 @@
 import * as WebBrowser from 'expo-web-browser';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -34,25 +34,11 @@ function GoogleSignInButtonInner({
   const [busy, setBusy] = useState(false);
 
   const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
-  const [request, response, promptAsync] = useGoogleAuthRequest(clientIds);
+  const [request, , promptAsync] = useGoogleAuthRequest(clientIds);
 
   const finishFromAuthResult = useCallback(
     async (result: AuthSessionResult) => {
       if (result.type === 'cancel' || result.type === 'dismiss') return;
-
-      if (result.type === 'error') {
-        const msg =
-          (result.error instanceof Error && result.error.message) ||
-          readGoogleAuthError(result) ||
-          'Google sign-in failed';
-        Alert.alert('Google sign-in failed', msg);
-        return;
-      }
-
-      if (result.type !== 'success') {
-        Alert.alert('Google sign-in failed', 'The sign-in browser closed unexpectedly. Try again.');
-        return;
-      }
 
       const oauthError = readGoogleAuthError(result);
       if (oauthError) {
@@ -60,12 +46,8 @@ function GoogleSignInButtonInner({
         return;
       }
 
-      const sessionId = readGoogleAuthSessionId(result);
-      if (sessionId) {
-        const { ok, message } = await signInWithSessionId(sessionId);
-        if (!ok) {
-          Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
-        }
+      if (result.type !== 'success') {
+        Alert.alert('Google sign-in failed', 'The sign-in browser closed unexpectedly. Try again.');
         return;
       }
 
@@ -78,19 +60,22 @@ function GoogleSignInButtonInner({
         return;
       }
 
+      const sessionId = readGoogleAuthSessionId(result);
+      if (sessionId) {
+        const { ok, message } = await signInWithSessionId(sessionId);
+        if (!ok) {
+          Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
+        }
+        return;
+      }
+
       Alert.alert(
         'Google sign-in incomplete',
-        `No session received. Confirm this redirect URI in Google Cloud (Web client):\n${getGoogleOAuthRedirectPreview()}`,
+        `No authorization code received. Add this redirect URI in Google Cloud (Web client):\n${getGoogleOAuthRedirectPreview()}`,
       );
     },
     [googleRedirectUri, signInWithGoogleCode, signInWithSessionId],
   );
-
-  useEffect(() => {
-    if (!response || response.type !== 'success') return;
-    setBusy(true);
-    void finishFromAuthResult(response).finally(() => setBusy(false));
-  }, [finishFromAuthResult, response]);
 
   const waitingForGoogleRequest = !request;
   const loading = busy || waitingForGoogleRequest;

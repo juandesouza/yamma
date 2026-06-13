@@ -1,11 +1,33 @@
 import * as AuthSession from 'expo-auth-session';
-import * as Linking from 'expo-linking';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import { getApiBaseUrl } from './api';
 
-/** Google Cloud redirect URI (HTTPS). Server exchanges the code and redirects to mobile-done. */
+function expoGoAuthProxyRedirectUri(): string {
+  const owner = Constants.expoConfig?.owner ?? 'juandesouza';
+  const slug = Constants.expoConfig?.slug ?? 'yamma';
+  try {
+    const url = AuthSession.getRedirectUrl();
+    if (url?.startsWith('https://auth.expo.io/')) return url.replace(/\/$/, '');
+  } catch {
+    /* fall through */
+  }
+  return `https://auth.expo.io/@${owner}/${slug}`;
+}
+
+/**
+ * Google OAuth redirect URI.
+ *
+ * **Expo Go** must use `https://auth.expo.io/@owner/slug` — a custom API HTTPS redirect
+ * closes the in-app browser before the account picker appears.
+ *
+ * **Dev builds / standalone** may use the API bridge (`/auth/google/expo-redirect`).
+ */
 export function resolveGoogleOAuthRedirectUri(): string {
+  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
+    return expoGoAuthProxyRedirectUri();
+  }
+
   const override = process.env.EXPO_PUBLIC_GOOGLE_OAUTH_REDIRECT_URI?.trim();
   if (override) {
     return override.replace(/\/$/, '');
@@ -20,46 +42,11 @@ export function resolveGoogleOAuthRedirectUri(): string {
     return AuthSession.makeRedirectUri({ scheme: 'yamma', path: 'oauthredirect' });
   }
 
-  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
-    const owner = Constants.expoConfig?.owner;
-    const slug = Constants.expoConfig?.slug;
-    if (owner && slug) {
-      return `https://auth.expo.io/@${owner}/${slug}`;
-    }
-    try {
-      return AuthSession.getRedirectUrl();
-    } catch {
-      return 'https://auth.expo.io/@juandesouza/yamma';
-    }
-  }
-
   return AuthSession.makeRedirectUri({
     scheme: 'yamma',
     path: 'oauthredirect',
-    native: 'yamma:/oauthredirect',
+    native: 'yamma://oauthredirect',
   });
-}
-
-/** HTTPS URL openAuthSessionAsync waits for (not registered in Google Cloud). */
-export function resolveGoogleOAuthMobileDoneUri(): string {
-  const api = getApiBaseUrl().replace(/\/$/, '');
-  if (api.startsWith('https://')) {
-    return `${api}/auth/google/mobile-done`;
-  }
-  return `${api}/auth/google/mobile-done`;
-}
-
-/** @deprecated Legacy exp:// handoff — mobile-done HTTPS flow is preferred. */
-export function resolveGoogleOAuthAppReturnUri(): string {
-  try {
-    return Linking.createURL('oauthredirect');
-  } catch {
-    return AuthSession.makeRedirectUri({
-      scheme: 'yamma',
-      path: 'oauthredirect',
-      native: 'yamma://oauthredirect',
-    });
-  }
 }
 
 export function getGoogleOAuthRedirectPreview(): string {
