@@ -12,14 +12,14 @@ import {
 import { wakeApiHealth } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds, type GoogleOAuthClientIds } from '../config/google-oauth-config';
+import { resolveGoogleOAuthRedirectUri } from '../config/google-oauth-redirect';
+import { readGoogleAuthCode, useGoogleAuthRequest } from '../hooks/useGoogleSignIn';
 import {
-  resolveGoogleOAuthAuthSessionReturnUri,
-} from '../config/google-oauth-redirect';
-import { useGoogleAuthRequest } from '../hooks/useGoogleSignIn';
-import {
+  parseGoogleOAuthCodeFromUrl,
   parseGoogleOAuthErrorFromUrl,
-  parseGoogleOAuthSessionIdFromUrl,
 } from '../navigation/googleOAuthDeepLink';
+
+WebBrowser.maybeCompleteAuthSession();
 
 type Props = {
   disabled?: boolean;
@@ -31,32 +31,20 @@ function GoogleSignInButtonInner({
   variant,
   clientIds,
 }: Props & { clientIds: GoogleOAuthClientIds }) {
-  const { user, signInWithSessionId } = useAuth();
+  const { user, signInWithGoogleCode } = useAuth();
   const [busy, setBusy] = useState(false);
 
-  const authSessionReturnUri = useMemo(() => resolveGoogleOAuthAuthSessionReturnUri(), []);
+  const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
   const [request] = useGoogleAuthRequest(clientIds);
 
-  const finishWithSessionUrl = useCallback(
-    async (url: string | undefined) => {
-      if (!url) return false;
-
-      const oauthError = parseGoogleOAuthErrorFromUrl(url);
-      if (oauthError) {
-        Alert.alert('Google sign-in failed', oauthError);
-        return true;
-      }
-
-      const sessionId = parseGoogleOAuthSessionIdFromUrl(url);
-      if (!sessionId) return false;
-
-      const { ok, message } = await signInWithSessionId(sessionId);
+  const exchangeGoogleCode = useCallback(
+    async (code: string) => {
+      const { ok, message } = await signInWithGoogleCode(code, googleRedirectUri);
       if (!ok) {
         Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
       }
-      return true;
     },
-    [signInWithSessionId],
+    [googleRedirectUri, signInWithGoogleCode],
   );
 
   const onPress = useCallback(async () => {
@@ -76,26 +64,38 @@ function GoogleSignInButtonInner({
       const authUrl = request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
 
       await WebBrowser.warmUpAsync();
-      const browserResult = await WebBrowser.openAuthSessionAsync(authUrl, authSessionReturnUri);
+      const browserResult = await WebBrowser.openAuthSessionAsync(authUrl, googleRedirectUri);
 
       if (browserResult.type === 'cancel' || browserResult.type === 'dismiss') {
         return;
       }
 
-      if (browserResult.type === 'success' || browserResult.type === 'opened') {
-        const handled = await finishWithSessionUrl(
-          browserResult.type === 'success' ? browserResult.url : undefined,
-        );
-        if (!handled && browserResult.type === 'opened') {
-          Alert.alert(
-            'Google sign-in incomplete',
-            'The browser closed before we could finish sign-in. Try again.',
-          );
-        }
-      } else if (browserResult.type === 'error') {
+      if (browserResult.type === 'error') {
         Alert.alert(
           'Google sign-in failed',
           browserResult.error?.message ?? 'Try again or use email.',
+        );
+        return;
+      }
+
+      if (browserResult.type === 'success') {
+        const oauthError = parseGoogleOAuthErrorFromUrl(browserResult.url);
+        if (oauthError) {
+          Alert.alert('Google sign-in failed', oauthError);
+          return;
+        }
+
+        const code =
+          readGoogleAuthCode(browserResult) ??
+          parseGoogleOAuthCodeFromUrl(browserResult.url);
+        if (code) {
+          await exchangeGoogleCode(code);
+          return;
+        }
+
+        Alert.alert(
+          'Google sign-in incomplete',
+          `Google did not return an authorization code. Confirm this redirect URI is in Google Cloud (Web client):\n${googleRedirectUri}`,
         );
       }
     } catch (e) {
@@ -111,7 +111,7 @@ function GoogleSignInButtonInner({
       }
       setBusy(false);
     }
-  }, [authSessionReturnUri, finishWithSessionUrl, request, user]);
+  }, [exchangeGoogleCode, googleRedirectUri, request, user]);
 
   const waitingForGoogleRequest = !request;
   const loading = busy || waitingForGoogleRequest;

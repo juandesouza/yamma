@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { apiUrl, authedFetch, messageFromApiBody, postJson } from '../api/client';
 import { ngrokFetchHeaders } from '../config/api';
+import { isGuestUserEmail } from '../lib/guest-user';
 import type { AuthUser } from '../types/auth';
 
 const STORAGE_SESSION = 'yamma_session_id';
@@ -68,6 +69,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         if (res.ok) {
           const body = (await res.json()) as { user: AuthUser };
+          if (isGuestUserEmail(body.user?.email)) {
+            await clearStoredSession();
+            return;
+          }
           setSessionId(sid);
           setUser(body.user);
         } else {

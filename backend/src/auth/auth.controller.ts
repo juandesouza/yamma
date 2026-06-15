@@ -28,7 +28,8 @@ import { z } from 'zod';
 import { isGuestUserEmail } from './guest.constants';
 import { DATABASE_UNAVAILABLE_MESSAGE, isDatabaseConnectionError } from '../common/db-errors';
 import {
-  buildGoogleOAuthMobileDoneUrl,
+  sendGoogleOAuthCallbackHtml,
+  sendGoogleOAuthErrorHtml,
   sendGoogleOAuthMobileDoneHtml,
 } from '../common/google-oauth-bridge';
 import { sign, verify } from 'jsonwebtoken';
@@ -392,66 +393,24 @@ export class AuthController {
   }
 
   /**
-   * Google OAuth redirect (registered in Google Cloud). Exchanges code server-side then
-   * 302 → /auth/google/mobile-done?sessionId= so openAuthSessionAsync completes (Lemon pattern).
+   * Google OAuth redirect (registered in Google Cloud). Returns a static page so
+   * openAuthSessionAsync captures `?code=` on this URL; the app exchanges via POST /auth/google/mobile-code.
    */
   @Get('google/expo-redirect')
-  async googleExpoRedirect(
+  googleExpoRedirect(
     @Query() query: Record<string, string | string[] | undefined>,
     @Res() res: Response,
   ) {
-    const redirectUri = this.config.mobileGoogleExpoRedirectUri;
-    const code = (Array.isArray(query.code) ? query.code[0] : query.code)?.trim();
     const oauthError =
       (Array.isArray(query.error_description) ? query.error_description[0] : query.error_description)?.trim() ||
       (Array.isArray(query.error) ? query.error[0] : query.error)?.trim();
 
-    const apiUrl = this.config.apiUrl.replace(/\/$/, '');
-
     if (oauthError) {
-      res.redirect(
-        302,
-        buildGoogleOAuthMobileDoneUrl(apiUrl, { error: oauthError.slice(0, 300) }),
-      );
+      sendGoogleOAuthErrorHtml(res, oauthError.slice(0, 300));
       return;
     }
 
-    if (!code) {
-      res.redirect(
-        302,
-        buildGoogleOAuthMobileDoneUrl(apiUrl, {
-          error: 'Missing authorization code from Google.',
-        }),
-      );
-      return;
-    }
-
-    try {
-      const { sessionId } = await this.completeGoogleOAuth(code, redirectUri);
-      res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiUrl, { sessionId }));
-    } catch (e: unknown) {
-      if (isDatabaseConnectionError(e)) {
-        res.redirect(
-          302,
-          buildGoogleOAuthMobileDoneUrl(apiUrl, {
-            error: DATABASE_UNAVAILABLE_MESSAGE.slice(0, 300),
-          }),
-        );
-        return;
-      }
-      let message = 'Google sign-in failed';
-      if (e instanceof HttpException) {
-        const r = e.getResponse();
-        if (typeof r === 'string') message = r;
-        else if (r && typeof r === 'object' && 'message' in r) {
-          const m = (r as { message?: string | string[] }).message;
-          message = Array.isArray(m) ? m.join(', ') : String(m ?? message);
-        }
-      } else {
-        message = formatUnknownError(e).slice(0, 300);
-      }
-      res.redirect(302, buildGoogleOAuthMobileDoneUrl(apiUrl, { error: message.slice(0, 300) }));
-    }
+    sendGoogleOAuthCallbackHtml(res, 'Returning to Yamma…');
   }
 
   /** HTTPS return URL for openAuthSessionAsync (not registered in Google Cloud). */

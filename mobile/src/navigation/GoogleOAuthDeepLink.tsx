@@ -50,9 +50,6 @@ export function GoogleOAuthDeepLink() {
     const sub = Linking.addEventListener('url', (event) => {
       void handle(event.url);
     });
-    void Linking.getInitialURL().then((url) => {
-      if (url) void handle(url);
-    });
     return () => sub.remove();
   }, [signInWithSessionId, user]);
 
