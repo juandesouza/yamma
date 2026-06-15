@@ -28,10 +28,13 @@ import { z } from 'zod';
 import { isGuestUserEmail } from './guest.constants';
 import { DATABASE_UNAVAILABLE_MESSAGE, isDatabaseConnectionError } from '../common/db-errors';
 import {
+  resolveGoogleOAuthAppReturnTarget,
+  sendAppResumeHtml,
   sendGoogleOAuthCallbackHtml,
   sendGoogleOAuthErrorHtml,
   sendGoogleOAuthMobileDoneHtml,
 } from '../common/google-oauth-bridge';
+import { peekGoogleOAuthPending, setGoogleOAuthPending, takeGoogleOAuthPending } from './google-oauth-pending.store';
 import { sign, verify } from 'jsonwebtoken';
 import * as nodemailer from 'nodemailer';
 
@@ -393,24 +396,91 @@ export class AuthController {
   }
 
   /**
-   * Google OAuth redirect (registered in Google Cloud). Returns a static page so
-   * openAuthSessionAsync captures `?code=` on this URL; the app exchanges via POST /auth/google/mobile-code.
+   * Google OAuth redirect (registered in Google Cloud). Exchanges the code, stores the
+   * session for mobile polling, and tries exp:// handoff (Android Custom Tabs ignore openAuthSessionAsync).
    */
   @Get('google/expo-redirect')
-  googleExpoRedirect(
+  async googleExpoRedirect(
     @Query() query: Record<string, string | string[] | undefined>,
     @Res() res: Response,
   ) {
+    const redirectUri = this.config.mobileGoogleExpoRedirectUri;
+    const stateRaw = Array.isArray(query.state) ? query.state[0] : query.state;
+    const state = stateRaw?.trim() ?? '';
+    const code = (Array.isArray(query.code) ? query.code[0] : query.code)?.trim();
     const oauthError =
       (Array.isArray(query.error_description) ? query.error_description[0] : query.error_description)?.trim() ||
       (Array.isArray(query.error) ? query.error[0] : query.error)?.trim();
 
     if (oauthError) {
+      if (state) {
+        setGoogleOAuthPending(state, { error: oauthError.slice(0, 300) });
+      }
       sendGoogleOAuthErrorHtml(res, oauthError.slice(0, 300));
       return;
     }
 
-    sendGoogleOAuthCallbackHtml(res, 'Returning to Yamma…');
+    if (!code) {
+      sendGoogleOAuthCallbackHtml(res, 'Return to the Yamma app to finish sign-in.');
+      return;
+    }
+
+    if (!state) {
+      sendGoogleOAuthErrorHtml(res, 'Missing OAuth state. Try Google sign-in again from the app.');
+      return;
+    }
+
+    try {
+      const { sessionId } = await this.completeGoogleOAuth(code, redirectUri);
+      setGoogleOAuthPending(state, { sessionId });
+      const appTarget = resolveGoogleOAuthAppReturnTarget(state, { sessionId });
+      sendAppResumeHtml(res, appTarget);
+    } catch (e: unknown) {
+      let message = 'Google sign-in failed';
+      if (isDatabaseConnectionError(e)) {
+        message = DATABASE_UNAVAILABLE_MESSAGE.slice(0, 300);
+      } else if (e instanceof HttpException) {
+        const r = e.getResponse();
+        if (typeof r === 'string') message = r;
+        else if (r && typeof r === 'object' && 'message' in r) {
+          const m = (r as { message?: string | string[] }).message;
+          message = Array.isArray(m) ? m.join(', ') : String(m ?? message);
+        }
+      } else {
+        message = formatUnknownError(e).slice(0, 300);
+      }
+      setGoogleOAuthPending(state, { error: message.slice(0, 300) });
+      sendGoogleOAuthErrorHtml(res, message.slice(0, 300));
+    }
+  }
+
+  /** Mobile polls this while the in-app browser is on the Google / API bridge page. */
+  @Get('google/oauth-result')
+  @HttpCode(HttpStatus.OK)
+  googleOAuthResult(@Query('state') state: string | undefined) {
+    const key = state?.trim() ?? '';
+    if (!key) {
+      return { status: 'pending' as const };
+    }
+    const result = peekGoogleOAuthPending(key);
+    if (!result) {
+      return { status: 'pending' as const };
+    }
+    if (result.error) {
+      takeGoogleOAuthPending(key);
+      return { status: 'error' as const, error: result.error };
+    }
+    if (result.sessionId) {
+      return { status: 'ready' as const, sessionId: result.sessionId };
+    }
+    return { status: 'pending' as const };
+  }
+
+  @Post('google/oauth-complete')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  googleOAuthComplete(@Query('state') state: string | undefined) {
+    const key = state?.trim() ?? '';
+    if (key) takeGoogleOAuthPending(key);
   }
 
   /** HTTPS return URL for openAuthSessionAsync (not registered in Google Cloud). */

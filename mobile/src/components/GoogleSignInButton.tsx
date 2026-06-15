@@ -1,6 +1,7 @@
 import * as Google from 'expo-auth-session/providers/google';
+import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -9,15 +10,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { wakeApiHealth } from '../api/client';
+import { apiUrl, wakeApiHealth } from '../api/client';
+import { ngrokFetchHeaders } from '../config/api';
 import { useAuth } from '../auth/AuthContext';
 import { resolveGoogleClientIds, type GoogleOAuthClientIds } from '../config/google-oauth-config';
-import { resolveGoogleOAuthRedirectUri } from '../config/google-oauth-redirect';
-import { readGoogleAuthCode, useGoogleAuthRequest } from '../hooks/useGoogleSignIn';
-import {
-  parseGoogleOAuthCodeFromUrl,
-  parseGoogleOAuthErrorFromUrl,
-} from '../navigation/googleOAuthDeepLink';
+import { withGoogleMobileOAuthState } from '../config/google-oauth-state';
+import { useGoogleAuthRequest } from '../hooks/useGoogleSignIn';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -26,30 +24,64 @@ type Props = {
   variant?: 'login' | 'register';
 };
 
+type OAuthPollResult =
+  | { status: 'pending' }
+  | { status: 'ready'; sessionId: string }
+  | { status: 'error'; error: string };
+
+const POLL_MS = 800;
+const POLL_TIMEOUT_MS = 90_000;
+
+async function safeDismissBrowser(): Promise<void> {
+  try {
+    const result = WebBrowser.dismissBrowser();
+    if (result && typeof (result as Promise<unknown>).then === 'function') {
+      await result;
+    }
+  } catch {
+    /* unavailable in Expo Go on some platforms */
+  }
+}
+
+async function pollGoogleOAuthResult(state: string): Promise<OAuthPollResult> {
+  const res = await fetch(apiUrl(`/auth/google/oauth-result?state=${encodeURIComponent(state)}`), {
+    headers: ngrokFetchHeaders(),
+  });
+  if (!res.ok) {
+    return { status: 'pending' };
+  }
+  const body = (await res.json()) as OAuthPollResult;
+  return body;
+}
+
 function GoogleSignInButtonInner({
   disabled,
   variant,
   clientIds,
 }: Props & { clientIds: GoogleOAuthClientIds }) {
-  const { user, signInWithGoogleCode } = useAuth();
+  const { user, signInWithSessionId } = useAuth();
   const [busy, setBusy] = useState(false);
+  const pollCancelRef = useRef(false);
 
-  const googleRedirectUri = useMemo(() => resolveGoogleOAuthRedirectUri(), []);
+  const appReturnUri = useMemo(() => Linking.createURL('oauthredirect'), []);
   const [request] = useGoogleAuthRequest(clientIds);
 
-  const exchangeGoogleCode = useCallback(
-    async (code: string) => {
-      const { ok, message } = await signInWithGoogleCode(code, googleRedirectUri);
-      if (!ok) {
-        Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
+  const waitForOAuthResult = useCallback(async (state: string): Promise<OAuthPollResult> => {
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+    while (!pollCancelRef.current && Date.now() < deadline) {
+      const result = await pollGoogleOAuthResult(state);
+      if (result.status !== 'pending') {
+        return result;
       }
-    },
-    [googleRedirectUri, signInWithGoogleCode],
-  );
+      await new Promise((r) => setTimeout(r, POLL_MS));
+    }
+    return { status: 'error', error: 'Timed out waiting for Google sign-in. Close the browser tab and try again.' };
+  }, []);
 
   const onPress = useCallback(async () => {
     if (!request || user) return;
 
+    pollCancelRef.current = false;
     setBusy(true);
     try {
       const apiReady = await wakeApiHealth();
@@ -61,42 +93,36 @@ function GoogleSignInButtonInner({
         return;
       }
 
-      const authUrl = request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
+      const rawAuthUrl =
+        request.url ?? (await request.makeAuthUrlAsync(Google.discovery));
+      const authUrl = withGoogleMobileOAuthState(rawAuthUrl, appReturnUri);
+      const oauthState = new URL(authUrl).searchParams.get('state')?.trim() ?? '';
+      if (!oauthState) {
+        Alert.alert('Google sign-in failed', 'Could not start OAuth (missing state). Try again.');
+        return;
+      }
 
       await WebBrowser.warmUpAsync();
-      const browserResult = await WebBrowser.openAuthSessionAsync(authUrl, googleRedirectUri);
+      void WebBrowser.openBrowserAsync(authUrl);
 
-      if (browserResult.type === 'cancel' || browserResult.type === 'dismiss') {
+      const pollPromise = waitForOAuthResult(oauthState);
+      const result = await pollPromise;
+      await safeDismissBrowser();
+
+      if (result.status === 'error') {
+        Alert.alert('Google sign-in failed', result.error);
         return;
       }
-
-      if (browserResult.type === 'error') {
-        Alert.alert(
-          'Google sign-in failed',
-          browserResult.error?.message ?? 'Try again or use email.',
-        );
-        return;
-      }
-
-      if (browserResult.type === 'success') {
-        const oauthError = parseGoogleOAuthErrorFromUrl(browserResult.url);
-        if (oauthError) {
-          Alert.alert('Google sign-in failed', oauthError);
-          return;
+      if (result.status === 'ready') {
+        const { ok, message } = await signInWithSessionId(result.sessionId);
+        if (ok) {
+          await fetch(apiUrl(`/auth/google/oauth-complete?state=${encodeURIComponent(oauthState)}`), {
+            method: 'POST',
+            headers: ngrokFetchHeaders(),
+          }).catch(() => {});
+        } else {
+          Alert.alert('Google sign-in failed', message ?? 'Try again or use email.');
         }
-
-        const code =
-          readGoogleAuthCode(browserResult) ??
-          parseGoogleOAuthCodeFromUrl(browserResult.url);
-        if (code) {
-          await exchangeGoogleCode(code);
-          return;
-        }
-
-        Alert.alert(
-          'Google sign-in incomplete',
-          `Google did not return an authorization code. Confirm this redirect URI is in Google Cloud (Web client):\n${googleRedirectUri}`,
-        );
       }
     } catch (e) {
       Alert.alert(
@@ -104,6 +130,7 @@ function GoogleSignInButtonInner({
         e instanceof Error ? e.message : 'Try again or use email.',
       );
     } finally {
+      pollCancelRef.current = true;
       try {
         await WebBrowser.coolDownAsync();
       } catch {
@@ -111,7 +138,7 @@ function GoogleSignInButtonInner({
       }
       setBusy(false);
     }
-  }, [exchangeGoogleCode, googleRedirectUri, request, user]);
+  }, [appReturnUri, request, signInWithSessionId, user, waitForOAuthResult]);
 
   const waitingForGoogleRequest = !request;
   const loading = busy || waitingForGoogleRequest;
